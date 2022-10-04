@@ -1,10 +1,15 @@
 classdef nurbs < handle
+    %CUSTOMIZATION variables
     properties (SetAccess = public)
+        name %Name of the nurbs' graphics as they appear on axes legend.
+        color %Color of nurbs' graphics as will be rendered in an axes object.
+        
         canvas %Axes object on which to draw.
         sketches %Structured array containing handles to the graphical objects.
     end%properties(public)
+    %DEFINING DATA variables
     properties (SetAccess = private)
-        ID %An integer tag.
+        ID %An integer tag. %DEPRECATE?
         d %Highest derivative computed.
         p %Degree of the basis splines.
         o %Order of the NURBS
@@ -21,20 +26,24 @@ classdef nurbs < handle
         points %Number of points (length of CP and w).
         dim %Dimension of control points.
         g %Discrete granularity parameter.
+        txy
+        nxy
+        
         XYZ%Discretely interpolated values and derivatives.
         valid %Whether the minimum inputs are valid.
         generated %Boolean flag (whether discrete points have been generated for this curve).
     end
-    properties (SetAccess = protected)
-        XYZ_plot %handle for plotting C(u)
-        CP_scatter %Handle for plotting the control points.
-        vel_quiver %Handle for plotting tangent vectors.
+    properties (SetAccess = protected)        
+        XYZ_plot %handle for plotting C(u). %DEPRECATE
+        CP_scatter %Handle for plotting the control points. %DEPRECATE
+        vel_quiver %Handle for plotting tangent vectors. %DEPRECATE
     end%properties (Protected)
+    %FLAG and STATE variables.
     properties (Hidden = true)
         %State variables
-        CP_defined
-        kn_defined
-        w_defined
+        CP_defined %DEPRECATE
+        kn_defined %DEPRECATE
+        w_defined %DEPRECATE
         
         %Graphics state variables
         canvas_set %Whether an axis on which to plot has been set.
@@ -42,13 +51,17 @@ classdef nurbs < handle
         tangents_computed
         normals_computed
         
-        %Computational buffers
+        %Computational buffers %DEPRECATE with the future polynomial.m and
+        %spline.m
         R_buffer %Stores polynomial coefficients of the rational part of the NURBS.
         S_buffer %Stores polynomial coefficients of the B-splines that are active over a knot interval.        
     end%properties
-    methods
+    %High-level instance CREATION routines.
+    methods (Static)
         %Constructor
         function this = nurbs(varargin)
+            this.name = 'NURBS';
+            this.color = [0,0,0];
             this.valid = false; %Inputs registered but not validated.
             this.tangents_computed = false;
             this.normals_computed = false;
@@ -58,7 +71,8 @@ classdef nurbs < handle
                 'Curve',[],...
                 'Polygon',[],...
                 'Tangents',[],...
-                'Normals',[]);
+                'Normals',[],...
+                'CP_Labels',[]);
             if nargin == 0
                 this.XYZ_plot = [];
                 this.CP_scatter = [];
@@ -118,6 +132,27 @@ classdef nurbs < handle
             end%ii
         end%function
         
+        %Custom creation routines.
+        function nrb = CreateFromPolygon(poly,p,g)
+            if ~(exist('polygon','file') == 2)
+                
+            end%if
+            nrb = nurbs(...
+                'CP',[poly.XY;poly.XY(end,:)],...
+                'p',p,...
+                'g',g);
+        end%function.
+        
+        %Create a NURBS from CP obtained by offseting another NURBS. Child
+        %NURBS inherits the same knot vector, order, but not the weights.
+        function nrb = CreateFromNURBSOffset(progenitor)
+            nrb = nurbs;
+            
+        end%function
+    end%methods (Creation)
+    %High-level instance MODIFICATION and QUERY routines.
+    methods
+       
         %Input validation prior to NURBS generation
         function validate(this)
             %Check the control points.
@@ -216,42 +251,71 @@ classdef nurbs < handle
         function generate(this,d)
             this.d = d;
             [this.granules,this.XYZ] = this.evaluate(this.g,this.d);
+            this.nxy = zeros(this.granules,2);
+            this.txy = zeros(this.granules,2);
+            this.ComputeTangents;
+            this.ComputeNormals;
+            
             this.generated = true;
         end%function
         
-        %Compute the unit orthogonal vectors on the discrete NURBS.
-        function ComputeNormals(this)
-            if ~this.generated
-                warning('NURBS is not generated! Cannot compute unit normal vectors.')
-                return;
-            end%if
-            
-            %{
-            %This depends on whether the NURBS is 2D or 3D.
-            switch this.dim
-                case 2
-                case 3
-                otherwise
-            end%switch
-            %}
-            
-            if this.d > 1 %Second derivatives available.
-                
-            end%if
-            if this.tangents_computed
-                
-            end%if
-        end%function
-        
-        %Compute the unit tangent vectors on the discrete NURBS.
+        %Orientation.
         function ComputeTangents(this)
             if ~this.generated
                 warning('NURBS is not generated! Cannot compute unit tangent vectors.')
                 return;
             end%if
             if this.d > 0 %First derivative available.
-                
-            end%
+                for ii = 1:this.granules
+                    
+                    %Compute the magnitude of the 1st derivative.
+                    mag = 0;
+                    for jj = 1:this.dim
+                        mag = mag + this.XYZ{jj}(ii,2)*this.XYZ{jj}(ii,2);
+                    end%jj
+                    mag = sqrt(mag);
+                    
+                    %Compute a normalized tangent vector.
+                    for jj = 1:this.dim
+                        this.txy(ii,jj) = this.XYZ{jj}(ii,2)/mag;
+                    end%jj
+                end%ii
+                this.tangents_computed = true;
+                return;
+            end%if
+        end%function
+        function ComputeNormals(this)
+            if ~this.generated
+                warning('NURBS is not generated! Cannot compute unit normal vectors.')
+                return;
+            end%if
+            this.dim
+            this.tangents_computed
+            %This depends on whether the NURBS is 2D or 3D.
+            switch this.dim
+                case 2 %In 2D one can use the cross product (cheaper).
+                    if this.tangents_computed
+                        for ii = 1:this.granules
+                            [this.nxy(ii,1),this.nxy(ii,2)] = nurbs.UnitNormal2D(this.txy(ii,1),this.txy(ii,2));
+                        end%ii
+                    end%if
+                case 3
+                    fprint('WIP!\n');
+                otherwise
+            end%switch
+            this.normals_computed = true;
+        end%function
+        function ReverseNormals(this)
+            for ii = 1:this.granules
+                for jj = 1:this.dim
+                    this.nxy(ii,jj) = -this.nxy(ii,jj);
+                end%jj
+            end%ii
+            if this.graphics_initialized
+                this.sketches.Normals.UData = this.nxy(:,1);
+                this.sketches.Normals.VData = this.nxy(:,2);
+            end%if
+            
         end%function
         
         %Evaluate the rational curve evenly between intervals.
@@ -720,6 +784,7 @@ classdef nurbs < handle
             end%ii
         end%ii
         
+        %DEPRECATE
         %Draw the NURBS curve
         function draw(this,ax)
             if nargin == 1 %No axes specified.
@@ -743,7 +808,9 @@ classdef nurbs < handle
                 this.XYZ_plot.ZData = this.XYZ{3}(:,1);
             end%if
         end%function
+        %DEPRECATE
         
+        %DEPRECATE
         %Draw Tangent vectors to NURBS
         function draw_velocity(this,ax)
             if nargin == 1 %No axes specified.
@@ -765,7 +832,9 @@ classdef nurbs < handle
                 'Color',[1,0,0]...
                 );            
         end
+        %DEPRECATE
         
+        %DEPRECATE
         %Draw the control points that define this NURBS.
         function draw_CP(this,ax)
             if nargin == 1 %No axes specified.
@@ -786,7 +855,8 @@ classdef nurbs < handle
             end
             this.CP_scatter.DisplayName = 'NURBS CP';
         end
-        
+        %DEPRECATE
+        %DEPRECATE
         %Label controls points
         function txt = label_CP(this,ax)
             %Create the numbered labels.
@@ -802,6 +872,7 @@ classdef nurbs < handle
                 'interpreter','latex',...
                 'FontName','Helvetica');
         end%function.
+        %DEPRECATE
         
         %Plot the Basis Splines
         function draw_bsplines(this,ax)
@@ -973,10 +1044,8 @@ classdef nurbs < handle
         end%function
         
     end%methods (Ordinary)
-    
     %Graphical setup
     methods 
-        
         %Signal that graphics are to be generated.
         function Show(this)
             %Make sure this object has a definition that is valid.
@@ -1007,19 +1076,45 @@ classdef nurbs < handle
                 this.sketches.Normals.Parent = ax;
             end%if
         end%function
+        function SetColor(this,RGB)
+            this.color = RGB;
+            if this.graphics_initialized
+                this.sketches.Curve.Color = RGB;
+                this.sketches.Polygon.Color = RGB;
+                this.sketches.Polygon.MarkerFaceColor = RGB;
+                this.sketches.Tangents.Color = RGB;
+                this.sketches.Normals.Color = RGB;
+                for ii = 1:this.points
+                    this.sketches.CP_Labels(ii).Color = RGB;
+                end%ii
+            end%if
+        end%function
+        function SetName(this,name)
+            this.name = name;
+            if this.graphics_initialized
+                this.sketches.Curve.DisplayName = name;
+                this.sketches.Polygon.DisplayName = [name,'Control Curve'];
+                this.sketches.Tangents.DisplayName = [name, 'Unit Tangents'];
+                this.sketches.Normals.DisplayName = [name,'Unit Normals'];
+            end%if
+        end%function
         
         %Create the Graphical objects.
         function InitializeGraphics(this)
             %This function assumes that a canvas has been set already.
+            if ~this.generated
+                warning('NURBS is not generated, cannot display.');
+                return;
+            end%if
             
             %This will sketch the rational curve C(u).
             this.sketches.Curve = line(...
                 'Parent',this.canvas,...
-                'XData',0,... %Do not initalize with empty ("[]" ) because...
-                'YData',0,... %MATLAB won't allow ANY property access otherwise.
-                'Color',[0,0,1],...
+                'XData',this.XYZ{1}(:,1),... %Do not initalize with empty ("[]" ) because...
+                'YData',this.XYZ{2}(:,1),... %MATLAB won't allow ANY property access otherwise.
+                'Color',this.color,...
                 'LineStyle','-',...
-                'DisplayName','NURBS');
+                'DisplayName',this.name);
             
             %This will sketch NURBS's control polygon.
             this.sketches.Polygon = line(...
@@ -1030,42 +1125,152 @@ classdef nurbs < handle
                 'LineStyle','--',...
                 'Marker','o',...
                 'MarkerEdgeColor',[0,0,0],...
-                'MarkerFaceColor',[0,0,1],...
-                'DisplayName','Control Polygon');
+                'MarkerFaceColor',this.color,...
+                'DisplayName',[this.name,'Control Curve']);
            
             %This will sketch the NURBS's unit tangent vectors.
             this.sketches.Tangents = quiver(...
-                'Parent',this.canvas,...
-                'XData',0,... %Do not initalize with empty ("[]" ) because...
-                'YData',0,... %MATLAB won't allow ANY property access otherwise.
-                'UData',0,...
-                'VData',0,...
-                'DisplayName','Unit tangents',...
+                this.canvas,...
+                this.XYZ{1}(:,1),... %Do not initalize with empty ("[]" ) because...
+                this.XYZ{2}(:,1),... %MATLAB won't allow ANY property access otherwise.
+                this.txy(:,1),...
+                this.txy(:,2),...
+                'Color',this.color,...
+                'DisplayName',[this.name,'Unit Tangents'],...
                 'Visible','off');
             
             %This will sketch the NURBS's unit normal vectors.
             this.sketches.Normals = quiver(...
-                'Parent',this.canvas,...
-                'XData',0,... %Do not initalize with empty ("[]" ) because...
-                'YData',0,... %MATLAB won't allow ANY property access otherwise.
-                'UData',0,...
-                'VData',0,...
-                'DisplayName','Unit normals',...
+                this.canvas,...
+                this.XYZ{1}(:,1),... %Do not initalize with empty ("[]" ) because...
+                this.XYZ{2}(:,1),... %MATLAB won't allow ANY property access otherwise.
+                this.nxy(:,1),...
+                this.nxy(:,2),...
+                'DisplayName',[this.name,'Unit Normals'],...
+                'Color',this.color,...
                 'Visible','off');
+            
+            %This will render labels for the control vertices.
+            %Create the labels for Vertices
+            this.sketches.CP_Labels = text(...
+                this.CP(:,1),...
+                this.CP(:,2),...
+                '');
+            for ii = 1:this.points
+                this.sketches.CP_Labels(ii).Color = this.color;
+                this.sketches.CP_Labels(ii).Visible = 'off';
+                this.sketches.CP_Labels(ii).Interpreter = 'latex';
+                this.sketches.CP_Labels(ii).String = {...
+                    ['P$_{',num2str(ii),'}$'],...
+                    ['w = ',num2str(this.w(ii))]...
+                    };
+            end%ii
             
             this.graphics_initialized  = true;
         end%function.
         
-        %Draw Curve
-        function Draw(this)
+        %Visibility toggling functions
+        function Toggle(this,varargin)
+            %NOTE: It is possible to avoid the if-else "ladder" by using
+            %MATLAB's notation struct.(*string*). C-programming does not
+            %allow this, so here I settle with the "ladder" until I find
+            %something more reminiscent of what is allowed in C.
+            %NOTE: GNU has created something called "gperf" which may help
+            %with this issue when porting to C and OpenGL.
+            for ii = 1:(nargin - 1)
+                if strcmpi(varargin{ii},'Curve') == 1
+                    VisibilityToggle(this,this.sketches.Curve);
+                elseif strcmpi(varargin{ii},'Polygon') == 1
+                    VisibilityToggle(this,this.sketches.Polygon);
+                elseif strcmpi(varargin{ii},'Normals') == 1
+                    VisibilityToggle(this,this.sketches.Normals);
+                elseif strcmpi(varargin{ii},'Tangents') == 1
+                    VisibilityToggle(this,this.sketches.Tangents);
+                elseif strcmpi(varargin{ii},'CP_Labels') == 1
+                    for jj = 1:this.points
+                        VisibilityToggle(this,this.sketches.CP_Labels(jj));
+                    end%jj
+                else
+                    warning('Unrecognizable graphics option.');
+                end%if
+            end
+        end%function
+        function VisibilityToggle(this,handle)
+            if ~this.graphics_initialized
+                warning(['Cannot toggle ',handle.DisplayName,' of polygon "',this.name,'" (graphics uninitialized).']);
+                return;
+            end%if
+            if ~isvalid(handle)
+                warning(['Cannot toggle ',handle.DisplayName,' of polygon "',this.name,'" (deleted handle).']);
+                return;
+            end%if
+            if strcmp(handle.Visible,'on') == 1
+                handle.Visible = 'off';
+            else
+                handle.Visible = 'on';
+            end%if
+        end%function
+    end%methods (Graphics)
+    %Graphical demonstrations
+    methods (Static)
+        
+        %Draw a NURBS circle.
+        function [ax,nrb] = CircleDemo
+            clc;
+            clear;
+            close all;
+            
+            ax = custom_axis;
+            axis(ax,'equal');
+            R = 1; %Radius of the circle.
+            xc = 0.5;
+            yc = 0.5;
+            
+            %Define the control points.
+            control_points = [...
+                xc + R, yc;...     %Point 0
+                xc + R, yc + R;... %Point 1
+                xc - R, yc + R;... %Point 2
+                xc - R, yc;...     %Point 3
+                xc - R, yc - R;... %Point 4
+                xc + R, yc - R;... %Point 5
+                xc + R, yc];       %Point 6 (Repeat of Point 0).
+            
+            %Define the weights.
+            control_weights = [...
+                1.0,... %Point 0
+                0.5,... %Point 1
+                0.5,... %Point 2
+                1.0,... %Point 3
+                0.5,... %Point 4
+                0.5,... %Point 5
+                1.0];   %Point 6 (Repeat of Point 0).
+            
+            %NOTE: The knot vector can be arbitrary. Let the nurbs routine
+            %define a default.
+            nrb = nurbs(...
+                'CP',control_points,... %The XY points defined above.
+                'w',control_weights,... %The weights defined above.
+                'p',2,... %Degree of the piecewise polynomials.
+                'g',9); %Granularity parameter for plotting.
+            nrb.generate(2);
+            nrb.SetCanvas(ax);
+            nrb.Show;
         end%function
         
-        %Draw Control Polygon
-        function DrawControlPolygon(this)
-            
-            
-            
+    end%methods (Graphical demonstrations)
+    
+    methods (Static)
+        %Compute a unit normal.
+        function [nx,ny] = UnitNormal2D(dx,dy)
+            mag = sqrt(dx*dx + dy*dy); %Magnitude of the input direction.
+            A = dx/mag; %Normalized X-component of the direction.
+            B = dy/mag; %Normalized Y-component of the direction.
+            detA = A*A + B*B; %Determinant of the matrix.
+            nx = -B/detA;
+            ny = A/detA;
         end%function
-                
-    end%methods (Graphics)
+        
+    end%methods (Static)
+    
 end
