@@ -1,8 +1,47 @@
+%% circle.m
+%  Written by J.A. Ferrand B.Sc (ID: 2431646)
+%  Embry-Riddle Aeronautical University - Daytona Beach
+%  College of Engineering (COE)
+%  Department of Aerospace Engineering (AE)
+%% Description
+% A simple data structure used to represent circles in the 2D plane and to
+% perform elementary geometric and CAD operations. Basic creation routines
+% such as the three-point circle and fillet are available. Point inclusion
+% detection.
+%% Formulae
+% Area
+%%
+% $A = \pi R^{2}$
+%%
+% Perimeter
+%% 
+% $P = 2\pi R$
+%% 
+% Three-point circle.
+%% 
+% $\begin{array}{c} A_{1} = x_{1} - x_{2} \\
+% A_{2} = y_{1} - y_{2}\\
+% A_{3} = x_{1} - x_{3}\\
+% A_{4} = y_{1} - y_{3}\\
+% \|A\| = A_{1}A_{4} - A_{3}A_{2}\\
+% B_{1} = x_{1}^{2} - x_{2}^{2} + y_{1}^{2} - y_{2}^{2}\\
+% B_{2} = x_{1}^{2} - x_{3}^{2} + y_{1}^{2} - y_{3}^{2}\\
+% x_{c} = \frac{A_{4}B_{1} - A_{2}B_{2}}{\|A\|}\\
+% y_{c} = \frac{A_{1}B_{2} - A_{3}B_{1}}{\|A\|}\\
+% R = \sqrt{(x_{c} - x_{1})^{2} + (y_{c} - y_{1})^{2}}\end{array}$
+%%
+% Circular fillet (blend two straight lines)
+%%
+%% Class definition
 classdef circle < handle
+    %CUSTOMIZATION variables
     properties (SetAccess = public)
+        name %Name of the circle's graphics as they appear on axes legend.
+        color %Color of circle's graphics as will be rendered in an axes object.
         canvas %Axes object on which to draw the graphics.
         sketches %Structured array that contains all the plotting handles.
     end%properties (Public)
+    %DEFINING DATA variables
     properties (SetAccess = private)
         xc %X-coordinate of center.
         yc %Y-coordinate of center.
@@ -10,10 +49,13 @@ classdef circle < handle
         ey %Y-component of the assigned orientation.
         R %Radius.
     end%properties (Private)
+    %METRIC variables
     properties (SetAccess = protected)
         area
         perimeter
+        kappa
     end%properties (Protected)
+    %FLAG and STATE variables.
     properties (Hidden = true)
         valid
         updated
@@ -22,9 +64,8 @@ classdef circle < handle
         graphics_initialized
         canvas_set
     end%properties (Hidden)
-    %High-level functions that MODIFY specific instances of the class
-    %object.
-    methods
+    %High-level instance CREATION routines.
+    methods (Static)
         %Constructor
         function this = circle
             %Geometry-related
@@ -47,12 +88,49 @@ classdef circle < handle
             this.canvas = [];
             this.canvas_set = false;
             this.graphics_initialized = false;
-        end%function
+        end%function        
         
+        %Custom creation routines.
+        function this = CreateXYR(xc,yc,R)
+            %Define from a center and radius
+            this = circle;
+            if R < 0
+                error('Cannot define a negative radius!');
+            end%if
+            this.R = R;
+            this.xc = xc;
+            this.yc = yc;
+            this.valid = true;
+        end%function
+        function this = Create2P(x1,y1,x2,y2)
+            %Create a circle from two (2) points. The center is the average
+            %of the two points.
+            this = circle;
+            [this.xc,this.yc] = Center2P(x1,y1,x2,y2);
+            this.R = sqrt((x1 - this.xc)^2 + (y1 - this.yc)^2);
+        end%function          
+        function this = Create3P(x1,y1,x2,y2,x3,y3)
+            %Create a circle from three (3) points.
+            this = circle;
+            [this.xc,this.yc] = circle.Center3P(...
+                x1,y1,...
+                x2,y2,...
+                x3,y3);
+            this.R = sqrt((x1 - this.xc)^2 + (y1 - this.yc)^2);
+            this.valid = true;
+        end%function
+        function this = CreateFillet(x1,y1,dx1,dy1,x2,y2,dx2,dy2)
+            %Create a circle as a fillet to a 2-segment corner
+            this = circle;
+        end%function
+    end%methods(Static)
+    %High-level instance MODIFICATION and QUERY routines.
+    methods
         %Compute the metric properties of a circle
         function Measure(this)
-            this.area = circle.Area(this.R);
-            this.perimeter = circle.Perimeter(this.R);
+            this.perimeter = 2*pi*this.R;
+            this.area = 0.5*this.perimeter*this.R;
+            this.kappa = 1/this.R;
         end%function
         
         %Redefine from three points
@@ -71,15 +149,13 @@ classdef circle < handle
                 UpdateByTranslation(this,this.xc - old_xc,this.yc - old_yc);
                 UpdateByScaling(this,this.R/old_R);
             end%if
-        end%function
-        
-        %Redefine from two points
+        end%function        
         function Define2P(this,x1,y1,x2,y2)
             [this.xc,this.yc] = circle.TwoPointCenter(x1,y1,x2,y2);
             this.updated = false;
         end%function
         
-        %Move the circle in 2D space by a known distance and direction.
+        %Affine transformations
         function Displace(this,dx,dy)
             this.xc = this.xc + dx;
             this.yc = this.yc + dy;
@@ -185,6 +261,12 @@ classdef circle < handle
                 this.sketches.Center_Label.Parent = ax;
                 this.sketches.Orientation.Parent = ax;
             end%if
+        end%function
+        function SetName(this,string)
+            this.name = string;
+        end%function          
+        function SetColor(this,RGB)
+            this.color = RGB;
         end%function
         
         %Create the Graphical objects.
@@ -349,33 +431,7 @@ classdef circle < handle
             
         end%function
                 
-        %Decide which graphics to display.
-        %{
-        function ToggleGraphics(this,varargin)
-            ii = 1;
-            while ii < nargin
-                iip1 = ii + 1;
-                if strcmpi(varargin{ii},'center')
-                    this.show_center = varargin{iip1};
-                    if ~this.show_center
-                        this.sketch_center.Visible = 'off';
-                    else
-                        this.sketch_center.Visible = 'on';
-                    end%if
-                elseif strcmpi(varargin{ii},'sketch')
-                    this.show = varargin{iip1};
-                    if ~this.show
-                        this.sketch.Visible = 'off';
-                    else
-                        this.sketch.Visible = 'on';
-                    end%if
-                else
-                    error('Unrecognizable graphics toggle.');
-                end%if
-                ii = iip1;
-            end%while
-        end%function
-        %}
+     
     end%methods (Graphics)
     
     %Graphical demonstrations
@@ -429,45 +485,7 @@ classdef circle < handle
         end%function
     end%methods
     
-    %High-level functions that CREATE instances of the polynomial objects
-    %from low-level code.Error checking involved.
-    methods (Static)
-        %Define from a center and radius
-        function this = CreateXYR(xc,yc,R)
-            this = circle;
-            if R < 0
-                error('Cannot define a negative radius!');
-            end%if
-            this.R = R;
-            this.xc = xc;
-            this.yc = yc;
-            this.valid = true;
-        end%function
-        
-        %Create a circle from two (2) points.
-        function this = Create2P(x1,y1,x2,y2)
-            this = circle;
-            [this.xc,this.yc] = Center2P(x1,y1,x2,y2);
-            this.R = sqrt((x1 - this.xc)^2 + (y1 - this.yc)^2);
-        end%function
-        
-        %Create a circle from three (3) points.
-        function this = Create3P(x1,y1,x2,y2,x3,y3)
-            this = circle;
-            [this.xc,this.yc] = circle.Center3P(...
-                x1,y1,...
-                x2,y2,...
-                x3,y3);
-            this.R = sqrt((x1 - this.xc)^2 + (y1 - this.yc)^2);
-            this.valid = true;
-        end%function
-        
-        %Create a circle as a fillet to a 2-segment corner
-        function this = CreateFillet(x1,y1,dx1,dy1,x2,y2,dx2,dy2)
-            this = circle;
-        end%function
-        
-    end%methods(Static)
+ 
     %Low-level functions with no error checking specific to this class.
     methods (Static)
         
@@ -477,44 +495,35 @@ classdef circle < handle
             dy = yc - yp;
             inside = (R*R > (dx*dx + dy*dy));
         end%function
-        
-        %Area of a circle
-        function A = Area(R)
-            A = pi*R*R;
-        end%function
-        
-        %Perimeter of a circle
-        function P = Perimeter(R)
-            P = 2*pi*R;
-        end%function
-        
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%
+        %Make a New class for this.
         %Arc length of a circular sector.
         function arc = SectorArc(R,theta)
             arc = R*theta;
         end%function
-        
         %Perimeter of a circular sector
         function Ps = SectorPerimeter(R,theta)
             Ps = SectorArc(R,theta)+ 2*R;
         end%function
-        
         %Area of a circular sector
         function As = SectorArea(R,theta)
             As = Area(R);
             As = As*theta/(2*pi);
         end%function
-        
         %Chord of a circular sector
         function c = SectorChord(R,theta)
             c = 2*R*sin*(2*theta);
         end%function
-        
         %Sagitta of a circular sector
         function h = SectorSagitta(R,theta)
             c = SectorChord(R,theta);
             h = R - sqrt(R*R - c*c*0.25);
             clear c;
         end%function
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%
+        %Make a New class for this.
+
         
         %Generate evenly spaced discrete points on the circle.
         function xy_out = points_on(xc,yc,R,N)
@@ -605,10 +614,8 @@ classdef circle < handle
             %Last split
             parts{pieces} = circle.ShaolinTear(xc,yc,R,N,pieces,2,ex,ey);
         end%function
-        
-        %Shaolin "tear."
-        %THIS CODE COULD BE IMPROVED.
         function XY_out = ShaolinTear(xc,yc,R,N,pieces,tear,ex,ey)
+            %THIS CODE COULD BE IMPROVED.
             XY_out = zeros(4*N,2);
             if nargin < 7
                 ex = 1;
@@ -687,8 +694,6 @@ classdef circle < handle
                 theta = theta +delta;
             end%ii
         end%function
-        
-        %Shaolin "shard."
         function XY_out = ShaolinShard(xc,yc,R,N,pieces,shard,ex,ey)
             XY_out = zeros(4*N,2); %Allocate output.
             if pieces < 3

@@ -1,13 +1,86 @@
+%% ellipse.m
+%  Written by J.A. Ferrand B.Sc (ID: 2431646)
+%  Embry-Riddle Aeronautical University - Daytona Beach
+%  College of Engineering (COE)
+%  Department of Aerospace Engineering (AE)
+%% Description
+% A data structure used to generate and manipulates ellipses in the 2D
+% plane. For use in geometry and CAD applications. Custom creation routines
+% like elliptical fillet, from two arbitrary vectors and center (affine
+% circle transform), and from valid quadric curve coefficients. Can
+% generate elliptical arcs and perform point inclusion tests.
+%% Formulae
+% Area
+%%
+% $A = \pi a b$
+%%
+% Eccentricity
+%%
+% $e = \sqrt{1-\left(\frac{b}{a}\right)^{2}}$
+%%
+% "Linear" eccentricity (distance from center to a focus.
+%%
+% $c = \sqrt{a^{2} - b^{2}}$
+%%
+% Quadrics from parameters.
+%%
+% $\begin{array}{c}
+% A = a^{2}\sin^{2}{(\theta)} + b^{2}\cos^{2}{(\theta)}\\
+% B = 2(b^{2} - a^{2})\sin{(\theta)}\cos{(\theta)}\\
+% C = a^{2}\cos^{2}{(\theta)} + b^[2}\sin^{2}{(\theta)}\\
+% D = -2A x_{c} - B y_{c}\\
+% E = -B x_{c} - 2C y_{c}\\
+% F = A x_{c}^{2} + B x_{c} y_{x} + C y_{c}^2 - a^{2}b^{2}
+% \end{array}$
+%%
+% Measures from parameters.
+%%
+% Effective polar radius (measured counterclockwise from major radius)
+%%
+% $r(\theta) = \frac{b}{\sqrt{1 - \left(e\cos{\left(\theta\right)}\right)^{2}}}$
+%%
+% Affine parametrization
+%%
+% $E(t) = x_{0} + d_{1} \cos{\left(t\right)} + d_{2} \sin{\left(t\right)}$
+%%
+% Vertex anomaly
+%%
+% $\cot{\left(2 t_{0}\right)} = \frac{\|d_{1}\|^{2} - \|d_{2}\|^{2}}{2 d_{1} \cdot d_{2}}$
+%% Class definition
 classdef ellipse < handle
+    %CUSTOMIZATION variables
     properties (SetAccess = public)
-        sketch
-        sketch_center
-        sketch_a
-        sketch_b
+        name %Name of the ellipse's graphics as they appear on axes legend.
+        color %Color of ellipse's graphics as will be rendered in an axes object.
+        canvas %Axes object on which to draw the graphics.
+        sketches %Structured array that contains all the plotting handles.
+        
+        sketch %DEPRECATE
+        sketch_center %DEPRECATE
+        sketch_a %DEPRECATE
+        sketch_b %DEPRECATE
     end%properties
+    %remove
     properties (SetAccess = protected)
         N %Number of points to plot (when calling plotting routines).
     end
+    %remove
+    %DEFINING DATA variables
+    properties (SetAccess = protected)
+        center %Center. %DEPRECATE
+        a %major radius.
+        b %minus radius.
+        fa%Unit vector towards major radius from center. %DEPRECATE
+        fb%Unit vector towards minor radius from center. %DEPRECATE
+        
+        xc %X-coordinate of the center.
+        yc %Y-coordinate of the center.
+        eax %X-cosine of the major radius.
+        eay %Y-cosine of the major radius.
+        ebx %X-cosine of the minor radius.
+        eby %Y-cosine of the minor radius.
+    end
+    %METRIC variables
     properties (SetAccess = protected)
         A %(Quadric) coefficient of x^2;
         B %(Quadric) coefficient of x*y; 
@@ -16,27 +89,42 @@ classdef ellipse < handle
         E %(Quadric) coefficient of y;
         F %(Quadric) constant coefficient;
         dim %Dimension.
-        a %major radius.
-        b %minus radius.
         c %"linear" eccentricity.
         e %eccentricity.
+        l %semi-latus rectum.
         area %area.
-        d %direction cosines.
-        fa%Unit vector towards major radius from center.
-        fb%Unit vector towards minor radius from center.
+        d %direction cosines. DEPRECATE?
         n %Unit normal.
         kappa_a %Curvature at the major radius.
         kappa_b %Curvature at the minor radius.
-        center %Center.
         V1 %First Vertex.
         V2
         V3
         V4
+        F1 %First focus
+        F2 %Second focus
         generated %Flag to see if the ellipse is generated.
-    end
-    methods
+    end%properties (Protected)
+    %FLAG and STATE variables.
+    properties (Hidden = true)
+        canvas_set
+        graphics_initialized
+    end%properties
+    %High-level instance CREATION routines.
+    methods (Static)
         %Constructor
         function this = ellipse(varargin)
+            this.graphics_initialized = false;
+            this.canvas_set = false;
+            this.sketches = struct(...
+                'Curve',[],...
+                'Orientation',[],...
+                'Center',[],...
+                'Focci_Labels',[],...
+                'Focci',[],...
+                'Vertex_Labels',[],...
+                'Vertices',[]);
+            
             this.N = [];
             this.dim = [];
             this.a = [];
@@ -66,7 +154,81 @@ classdef ellipse < handle
             %}
         end%function
         
-        %Flip the direction of the major radius.
+        %Custom creation routines
+        function elli = CreateXYABTH(xc,yc,a,b,th)
+            elli = ellipse;
+            elli.xc = xc;
+            elli.yc = yc;
+            
+            sign_a = (a > 0) - (a < 0);
+            sign_b = (b > 0) - (b < 0);
+            if sign_a == 0 || sign_b == 0
+                error('Either "a" or "b" were input as zero!');
+            end%if
+            %Set the direction cosines.
+            elli.eax = cos(th);
+            elli.eay = sin(th);
+            elli.ebx = -elli.eay;
+            elli.eby = elli.eax;
+            
+            %Account for the signs of the inputs
+            elli.eax = elli.eax*sign_a;
+            elli.eay = elli.eay*sign_a;
+            elli.ebx = elli.ebx*sign_b;
+            elli.eby = elli.eby*sign_b;
+            elli.a = a*sign_a;
+            elli.b = b*sign_b;
+            
+        end%function
+        function elli = CreateFromQuadric(A,B,C,D,E,F)
+            ellip = ellipse;
+            
+        end%function
+        function elli = CreateSteinerEllipse(x0,y0,x1,y1,x2,y2)
+            %Create a Steiner ellipse from 2D coordinates of a triangle.
+            elli = ellipse;
+            
+            %Ellipse shares the 
+            C = zeros(1,2);
+            C(1) = (x0 + x1 + x2)/3;
+            C(2) = (y0 + y1 + y2)/3;
+            
+            %Create the "SC" side.
+            f1 = zeros(1,2);
+            f1(1) = x2 - C(1);
+            f1(2) = y2 - C(2);
+            
+            %Create the "AB" side.
+            f2 = zeros(1,2);
+            f2(1) = (x1 - x0)/sqrt(3);
+            f2(2) = (y1 - y0)/sqrt(3);
+            elli.genfrom2dir1c(f1,f2,C);
+        end%function
+        function elli = CreateSteinerInEllipse(x0,y0,x1,y1,x2,y2)
+            elli = ellipse;
+        end%function
+        
+    end
+    %High-level instance MODIFICATION and QUERY routines.
+    methods 
+        function Measure(this)
+            %Basic measures.
+            this.area = pi*this.a*this.b;
+            this.c = sqrt(this.a*this.a - this.b*this.b);
+            this.e = this.c/this.a;
+            this.l = this.a*(1 - this.e*this.e);
+            
+            %Quadric coefficients
+            this.A = (this.a*this.eay)^2 + (this.b*this.eax)^2;
+            this.B = 2*(this.b*this.b - this.a*this.a)*this.eax*this.eay;
+            this.C = (this.a*this.eax)^2 + (this.b*this.eay)^2;
+            this.D = -2*this.A*this.xc - this.B*this.yc;
+            this.E = -this.B*this.xc - 2*this.C*this.yc;
+            this.F = this.A*this.xc^2 + this.B*this.xc*this.yc + this.C*this.yc^2 - (this.a*this.b)^2;
+            
+        end%function
+        
+        %Orientation
         function flip_a(this)
             this.fa(1) = this.fa(1)*-1;
             this.fa(2) = this.fa(2)*-1;
@@ -75,8 +237,6 @@ classdef ellipse < handle
                 this.sketch_a.VData  = this.fa(2)*this.a;
             end%if
         end%function
-        
-        %Flip the direction of the inner radius.
         function flip_b(this)
             this.fb(1) = this.fb(1)*-1;
             this.fb(2) = this.fb(2)*-1;
@@ -557,31 +717,74 @@ classdef ellipse < handle
         end%function
 
     end%methods (Ordinary)
+    %Graphical setups.
+    methods
+        
+        %Create the Graphical objects.
+        function InitializeGraphics(this)
+            %This function assumes that a canvas has been set already.
+            %This will sketch the circle.
+            this.sketches.Curve = line(...
+                'Parent',this.canvas,...
+                'Color',this.color,...
+                'XData',[this.XY(:,1);this.XY(1,1)],... %Do not initalize with empty ("[]" ) because...
+                'YData',[this.XY(:,2);this.XY(1,2)],... %MATLAB won't allow ANY property access otherwise.
+                'Linewidth',1,...
+                'LineStyle','-',...
+                'DisplayName',this.name);
+         
+          
+            
+            this.graphics_initialized  = true;
+        end%function.           
+        
+        
+    end%methods (Graphics)
+    %Graphical demonstrations
     methods (Static)
-        %Create a Steiner ellipse from 2D coordinates of a triangle.
-        function this = steiner_ellipse(x0,y0,x1,y1,x2,y2)
-            this = ellipse;
-            
-            %Ellipse shares the 
-            C = zeros(1,2);
-            C(1) = (x0 + x1 + x2)/3;
-            C(2) = (y0 + y1 + y2)/3;
-            
-            %Create the "SC" side.
-            f1 = zeros(1,2);
-            f1(1) = x2 - C(1);
-            f1(2) = y2 - C(2);
-            
-            %Create the "AB" side.
-            f2 = zeros(1,2);
-            f2(1) = (x1 - x0)/sqrt(3);
-            f2(2) = (y1 - y0)/sqrt(3);
-            this.genfrom2dir1c(f1,f2,C);
+    end%methods (Demonstrations)
+    %Low-level functions with no error checking specific to this class.
+    methods (Static)
+        
+        %Compute the quadric coefficients from the ellipse's measures.
+        function [A,B,C,D,E,F] = Metrics2Quadrics(xc,yc,a,b,eax,eay)
+            A = a*a*eay*eay + b*b*eax*eax;
+            B = 2*(b*b - a*a)*eax*eay;
+            C = a*a*eax*eax + b*b*eay*eay;
+            D = -2*A*xc - B*yc;
+            E = -B*xc - 2*C*yc;
+            F = A*xc*xc + B*xc*yc + C*yc*yc - a*a*b*b;
         end%function
         
-        %Create
-        function this = steiner_inellipse(x0,y0,x1,y1,x2,y2)
-            this = ellipse;
+        %Compute the ellipses' measure from quadric coefficients.
+        function [xc,yc,a,b,eax,eay] = Quadrics2Metrics(A,B,C,D,E,F)
+            disc = B*B - 4*A*C;
+            if disc > 0
+                %If discriminant greater than 0, this quadric belongs to a
+                %conic other than an ellipse.
+                xc = NaN;
+                yc = NaN;
+                a = NaN;
+                b = NaN;
+                eax = NaN;
+                eay = NaN;
+                return;
+            end%if
+            det4 = A*E*E + C*D*D - B*D*E + disc*F; %This is 4 times the determinant.
+            
+            xc = (2*C*D - B*E)/disc;
+            yc = (2*A*E - B*D)/disc;
+            a = -sqrt(2*(det4)*(A + C  + sqrt((A - C)^2 + B*B)))/disc;
+            b = -sqrt(2*(det4)*(A + C  - sqrt((A - C)^2 + B*B)))/disc;
+            
+            th = atan((C- A - sqrt((A - C)^2 + B*B))/B)*(B ~= 0) + pi/4*(B == 0 & A > C);
+            eax = cos(th);
+            eay = sin(th);
+            
         end%function
-    end%methods (Static)
+        
+    end%methods
+    
+    
+    
 end%classdef

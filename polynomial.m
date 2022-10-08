@@ -1,26 +1,68 @@
+%% polynomial.m
+%  Written by J.A. Ferrand B.Sc (ID: 2431646)
+%  Embry-Riddle Aeronautical University - Daytona Beach
+%  College of Engineering (COE)
+%  Department of Aerospace Engineering (AE)
+%% Description
+% A data structure used to represent univariate polynomials. This is meant
+% to act as a building block for a greater data structure used to represent
+% splines. This early version supports elementary algebra and calculus
+% operations such as simple root factoring or differentiation. Custom
+% creation routines for special interpolation polynomials such as the
+% Bernstein and Lagrange polynomial constituents are available.
+%% Formulae
+%% Special Polynomials
+% Lagrange Polynomials
+%%
+% Bernstein Polynomials
+%% Root-finding formulae and algorithms 
+% Quadratic formula
+%%
+% $x_{1,2} = \frac{-b \pm \sqrt{b^{2} - 4ac}}{2a}$
+%% Class definition
 classdef polynomial < handle
+    %CUSTOMIZATION variables
     properties (SetAccess = public)
-        canvas
-        sketches
+        N %Number of points to evaluate the curve at.
+        x1%Lower limit of the visualization range.
+        x2%Upper limit of the visualization range.
         
-        sketch %Line graph of this polynomial %DEPRECATE
+        color %Color of polynomial's graphics as will be rendered in an axes object.
+        name %Name of the polynomial's graphics as they appear on axes legend.
+        canvas %Axes object on which to draw the polynomial.
+        sketches %Structure containing handles to the object's graphics.
     end%properties (public)
+    %DEFINING DATA variables
     properties (SetAccess = protected)
-        degree
-        coefficients
+        degree %Highest power of the polynomial's indeterminate.
+        coefficients %Constant multipliers of the polynomial.
     end%properties
+    %METRIC variables
+    properties (SetAccess = protected)
+        maxima
+        minima
+        roots
+    end% properties
+    %FLAG and STATE variables.
     properties (Hidden = true)
+        roots_computed %Whether the polynomial had its roots computed.
         valid %Whether this polynomial is valid.
         
         %Graphics related flags.
         canvas_set
         graphics_initialized
     end%properties
-    %High-level functions that MODIFY specific instances of the class
-    %object.
-    methods
+    %High-level instance CREATION routines.
+    methods (Static)
         %Constructor
         function this = polynomial
+            %Related to the object.
+            this.degree = [];
+            this.coefficients = [];
+            
+            %State variables
+            this.roots_computed = false;
+            this.valid = false;
             
             %Graphics related
             this.canvas_set = false;
@@ -30,12 +72,81 @@ classdef polynomial < handle
                 'Roots',[],...
                 'Inflection',[],...
                 'Extrema',[]);
+        end%function
+        
+        %Custom Creation routines.
+        function poly = CreateFromRoots(n_roots,roots)
+            %Create from roots
+            poly = polynomial; %Call constructor.
+            poly.degree = n_roots; %Degree is defined by
+            poly.roots = zeros(1,poly.degree);
+            for ii = 1:poly.degree
+                poly.roots(ii) = roots(ii);
+            end%ii
+            poly.coefficients = zeros(1,poly.degree + 1);
+            poly.coefficients = polynomial.ExpandRoots(n_roots,roots,poly.coefficients);
             
-            %Related to the object.
-            this.degree = [];
-            this.coefficients = [];
-            this.sketch = line.empty;
-            this.valid = [];
+            
+        end%function
+        function poly = CreateFromCoefficients(n_coeff,coeff)
+            %Create a polynomial from input coefficients.
+            if n_coeff < 1
+                error('Must input atleast one coefficient.')
+            end%if
+            poly.degree = n_coeff - 1;
+            poly.coefficients = coeff;
+        end%function
+        function poly = CreateFromDifferentiation(original)
+            %Create a polynomial by taking the derivative of an already
+            %existing polynomial.
+            poly = polynomial;
+            poly.degree = original.degree - 1;
+            poly.coefficients = polynomial.Differentiate(...
+                original.degree + 1,...
+                original.coefficients);
+        end%function
+        function poly = CreateFromIntegration(original,int_const)
+            %Create a polynomial by integrating an already existing polynomial.
+            %The user should input an integration constant, else, a default of
+            %zero is assumed.
+            poly = polynomial;
+            poly.degree = original.degree + 1;
+            if nargin == 1
+                int_const = 0;
+            end%if
+            poly.coefficients = zeros(1,poly.degree + 1);
+            poly.coefficients(1) = int_const;
+            poly.coefficients = polynomial.Integrate(...
+                poly.degree,... %#of coefficients in the original coefficient array.
+                original.coefficients,...
+                int_const);%Integration constant.
+        end%function
+        function poly = CreateFromAddition(polynomial_1,polynomial_2)
+            %Create a polynomial by adding two already existing ones.
+            poly = polynomial;
+            poly.degree = polynomial.greater(...
+                polynomial_1.degree,...
+                polynomial_2.degree);
+            poly.coefficients = polynomial.Addition(...
+                polynomial_1.degree + 1,... %#Coefficients in polynomial_1.
+                polynomial_1.coefficients,...
+                polynomial_2.degree + 1,... %#Coefficients in polynomial_2.
+                polynomial_2.coefficients);
+            poly.valid = true;
+        end%function
+        
+    end%methods (Static)
+    %High-level instance MODIFICATION and QUERY routines.
+    methods
+        function Print(this)
+            fprintf('%f\t',this.coefficients(1));
+            if this.degree >= 1
+                fprintf('+%fx\t',this.coefficients(2));
+            end%if
+            for ii = 3:(this.degree + 1)
+                fprintf('+%fx^%i\t',this.coefficients(ii),ii-1);
+            end%ii
+            fprintf('\n');
         end%function
         
         %Evaluate polynomial at 
@@ -103,8 +214,7 @@ classdef polynomial < handle
             end%if
         end%function
     end% methods (Ordinary)
-    
-        %Graphical setups.
+    %Graphical setups.
     methods
         %Whether the polygon is to be drawn.
         function Show(this)
@@ -136,6 +246,20 @@ classdef polynomial < handle
                 this.sketches.Inflection.Parent = ax;
             end%if
         end%function
+        function SetName(this,string)
+            this.name = string;
+            if graphics.initialized
+                this.sketches.Curve.DisplayName = string;
+                this.sketches.Roots.DisplayName = [string,'Roots'];
+            end%if
+        end%function
+        function SetColor(this,RGB)
+            this.color = RGB;
+            if graphics.initialized
+                this.sketches.Curve.Color = RGB;
+                this.sketches.Roots.MarkerFaceColor = RGB;
+            end%if
+        end%function
         
         %Create the Graphical objects.
         function InitializeGraphics(this)
@@ -146,86 +270,46 @@ classdef polynomial < handle
                 'XData',0,... %Do not initalize with empty ("[]" ) because...
                 'YData',0,... %MATLAB won't allow ANY property access otherwise.
                 'LineStyle','-',...
-                'DisplayName',[num2str(this.degree),'-degree polynomial']);
-                            
-   
+                'Color',this.color,...
+                'DisplayName',this.name);
             
+            %Show the roots.
+            this.sketches.Roots = line(...
+                'Parent',this.canvas,...
+                'XData',NaN(1,this.degree),... %Do not initalize with empty ("[]" ) because...
+                'YData',zeros(1,this.degree),... %MATLAB won't allow ANY property access otherwise.
+                'LineStyle','none',...
+                'MarkerFaceColor',this.color,...
+                'DisplayName',[this.name,'Roots']);             
             this.graphics_initialized  = true;
         end%function.           
-        
+        function TerminateGraphics(this)
+            %Release system resources used to render graphics.
+            delete(this.sketches.Curve);
+            delete(this.sketches.Roots);
+            
+            %Update the flag.
+            this.graphics_initialized  = false;
+        end%function
     end%methods (Graphics)
-    
-    
-    
-    
-    %High-level functions that CREATE instances of the polynomial objects
-    %from low-level code.Error checking involved.
-    methods (Static)
-        %Create a polynomial from input coefficients.
-        function poly = CreateFromCoefficients(n_coeff,coeff)
-            if n_coeff < 1
-                error('Must input atleast one coefficient.')
-            end%if
-            poly.degree = n_coeff - 1;
-            poly.coefficients = coeff;
-        end%function
-        %Create a polynomial by taking the derivative of an already
-        %existing polynomial.
-        function poly = CreateFromDifferentiation(original)
-            poly = polynomial;
-            poly.degree = original.degree - 1;
-            poly.coefficients = polynomial.Differentiate(...
-                original.degree + 1,...
-                original.coefficients);
-        end%function
-        %Create a polynomial by integrating an already existing polynomial.
-        %The user should input an integration constant, else, a default of
-        %zero is assumed.
-        function poly = CreateFromIntegration(original,int_const)
-            poly = polynomial;
-            poly.degree = original.degree + 1;
-            if nargin == 1
-                int_const = 0;
-            end%if
-            poly.coefficients = zeros(1,poly.degree + 1);
-            poly.coefficients(1) = int_const;
-            poly.coefficients = polynomial.Integrate(...
-                poly.degree,... %#of coefficients in the original coefficient array.
-                original.coefficients,...
-                int_const);%Integration constant.
-        end%function
-        %Create a polynomial by adding two already existing ones.
-        function poly = CreateFromAddition(polynomial_1,polynomial_2)
-            poly = polynomial;
-            poly.degree = polynomial.greater(...
-                polynomial_1.degree,...
-                polynomial_2.degree);
-            poly.coefficients = polynomial.Addition(...
-                polynomial_1.degree + 1,... %#Coefficients in polynomial_1.
-                polynomial_1.coefficients,...
-                polynomial_2.degree + 1,... %#Coefficients in polynomial_2.
-                polynomial_2.coefficients);
-            poly.valid = true;
-        end%function
-        %Create from roots
-        function poly = CreateFromRoots(n_roots,roots)
-            poly = polynomial;
-            poly.degree = n_roots;
-        end%function
-    end%methods (Static)
+    %Graphical demonstrations
+    methods
+    end %methods (Demonstrations)
     %Low-level functions with no error checking specific to this class.
     methods (Static)
         
-        %Quadratic formula for the roots of degree-2 polynomials.
+        %Root finding formulae and algorithms
         function [xr1,xr2] = QuadraticFormula(a,b,c)
             xr1 = -0.5*b/a;
             xr2 = xr1 - sqrt(xr1*xr1 - c/a);
             xr1 = 2*xr1 - xr2;
         end%function
-        %Cubic formula for the roots of degree-3 polynomials.
-        function [xr1,xr2,xr3] = CubicFormula(a,b,c,d)
+        function [xr1,xr2,xr3] = CubicFormula(a0,a1,a2,a3)
+            p = a1 - a2*a2/3;
+            q = a1*a2/3 - a0 -2*a2*a2*a2/27;
         end%function
-        %Expand polynomial coefficients from prescribed roots.
+        
+        %Custom operations involving roots of the polynomial.
         function coeff = ExpandRoots(n_roots,roots,coeff)
             if isempty(coeff) %Is this bad practice in C and in general?
                 coeff = zeros(1,n_roots + 1);%Allocate output memory for polynomial coefficients.
@@ -251,88 +335,294 @@ classdef polynomial < handle
             end%ii
             
         end%function
-        
-        %Compute the coefficients of a Lagrange Interpolating polynomial.
-        %THIS IS BUGGED! NEEDS FIXIGN!!
-        function coeff = LagrangeCoefficients(points,X,Y)
-            coeff = zeros(1,points); %Allocate memory for the output.
+        function coeff = InPlaceRootDeletion(degree,coeff,root)
+            %A specialized division routine for removing roots of
+            %polynomials (if known). If "coeff" contains the coefficients
+            %of polynomial "P", and "root" is a know root of "P", then this
+            %routine carries out the division of P/(x-root).
             
-            %The Lagrange constituents can be expanded as polynomial roots.
-            roots = zeros(1,points-1);
-            n_roots = points - 1;
-            
-            
-            %Generate and append the first Lagrange constituent to the
-            %running sum of coefficients.
-            coeff_roots = zeros(1,points);
-
-            %Construct the last Lagrange constituent and append.
-            for ii = 1:n_roots%Initialize the "roots" buffer.
-                roots(ii) = X(ii); %All roots except last. (n_roots + 1 = points)
-            end%ii
-            coeff_roots = polynomial.ExpandRoots(n_roots,roots,coeff_roots);
-            R_buffer = 1;
-            for ii = 1:n_roots
-                R_buffer = R_buffer*(X(points) - X(ii));
-            end%ii
-            for ii = 1:points %Appending
-                coeff(ii) = coeff(ii) + Y(points)*coeff_roots(ii)/R_buffer;
-            end%ii
-
-            %Construct the first Lagrange constuent.
-            roots(1) = X(points);
-            coeff_roots = polynomial.ExpandRoots(n_roots,roots,coeff_roots);
-            R_buffer = 1;
-            for ii = 2:points
-                R_buffer = R_buffer*(X(1) - X(ii));
-            end%ii
-            for ii = 1:points %Appending
-                coeff(ii) = coeff(ii) + Y(1)*coeff_roots(ii)/R_buffer;
-            end%ii            
-            roots(1) = X(1); %Undo the padding
-            
-            %Construct the Lagrange constituents in the middle if
-            %necessary. Append just like before.
-            if points > 2 
-                %Assemble the remaining Lagrange constituents.
-                for ii = (points - 1):-1:2
-                    iip1 = ii + 1;
-                    %Skip the point that would result division by zero.
-                    %Reset the buffer and reassemble it.
-                    R_buffer = 1;
-                    for jj = points:-1:iip1
-                        R_buffer = R_buffer*(X(ii) - X(jj));
-                    end%ii
-                    for jj = (ii - 1):-1:2
-                        R_buffer = R_buffer*(X(ii) - X(jj));
-                    end%jj
-                    %Append to the running coefficient buffer.
-                    coeff_roots = polynomial.ExpandRoots(n_roots,roots,coeff_roots);
-                    for jj = 1:points
-                        coeff(jj) = coeff(jj) + Y(ii)*coeff_roots(jj)/R_buffer;
-                    end%jj
-                    roots(ii) = X(iip1); %Permute the "roots" buffer.
+            %WARNING: This routine cannot remove roots at x = 0.
+            if root ~= 0
+                for ii = 1:degree
+                    coeff(ii) = coeff(ii)/-root;
+                    coeff(ii+1) = coeff(ii+1) - coeff(ii);
                 end%ii
+                coeff(degree + 1) = 0;
+            else
+                for ii = 1:degree
+                    coeff(ii) = coeff(ii+1);
+                end%ii
+                coeff(degree+1) = 0;
+            end%if
+        end%function
+        function coeff = InPlaceRootAddition(degree,coeff,root)
+            %WARNING: This routine is not aware of the memory allocated to
+            %"coeff." Make sure that this is being called on arrays with
+            %enough memory to store the coefficient resulting from the
+            %newly added root.
+            
+            %WARNING: This routine cannot operate on arrays of with ALL
+            %zeros. A zeroth degree polynomial must have a nonzero
+            %constant.
+            
+            %Test:
+            %[  6,-5,-2, 1] = (x-3)(x-1)(x+2)
+            %[-30,31, 5,-7,1] = (x-3)(x-1)(x+2)(x-5)
+            
+            %P(x) = Q(x)*(x - root) 
+            %Multiply by "x".
+            for ii = (degree + 2):-1:2
+                coeff(ii) = coeff(ii - 1); 
+            end%ii
+            coeff(1) = 0;
+            %if root ~= 0
+                %Multiply by "-root"
+                for ii = 1:(degree + 1)
+                    coeff(ii) = coeff(ii) - coeff(ii+1)*root;
+                end%ii
+            %end%if
+        end%function
+        
+        %Polynomial Long Division.
+        function [res,rem] = OutOfPlaceDivision(degree1,coeff1,degree2,coeff2)
+            %"res" is an output buffer that contains the coefficients of
+            %the dividend polynomial.
+            %"rem" is an output buffer that contains the coefficients of
+            %the remainder of the polynomial.
+        
+            
+            %[res,rem] = polynomial.OutOfPlaceDivision(4,[-4,4,0,5,6],2,[-1,1,2])
+            %[res,rem] = polynomial.OutOfPlaceDivision(4,[28,-46,27,-10,1],1,[-7,1])
+            
+            %Divide polynomial 1 by polynomial 2
+            res = zeros(1,degree1 + 1); %Allocate memory for the output buffer.
+            
+            %Make a copy of the coefficients being divided.
+            rem = zeros(1,degree1 + 1);
+            for ii = 1:(degree1 + 1)
+                rem(ii) = coeff1(ii);
+            end%ii
+            
+            [res,rem] = polynomial.InPlaceDivision(degree1,rem,degree2,coeff2,res);
+            %{
+            %%%%%%%%%%%%%%%% 
+            %This becomes inplace polynomial division.
+            for ii = 1:(degree1 - degree2 + 1)
+                idx1 = degree1 + 2 - ii;
+                idxr = idx1 - degree2;
+                res(idxr) = rem(idx1)/coeff2(degree2 + 1);
+                for jj = 1:(degree2 + 1)
+                    idxr1 = idx1 + 1 - jj;
+                    rem(idxr1) = rem(idxr1) - res(idxr)*coeff2(degree2 + 2 - jj);
+                end%jj
+            end%ii
+            %%%%%%%%%%%%%%%
+            %}
+        end%function
+        function [res,coeff1] = InPlaceDivision(degree1,coeff1,degree2,coeff2,res)            
+            %Divide the polynomial coefficients encoded inside "coeff1"
+            %inplace by the polynomial coefficients encoded inside
+            %"coeff2".
+            
+            %"res" needs to be a sufficiently large buffer to store the
+            %result of the division. At the conclusion of this routine,
+            %"coeff1" will contain the coefficients of the remainder of the
+            %division.
+            for ii = 1:(degree1 - degree2 + 1)
+                idx1 = degree1 + 2 - ii;
+                idxr = idx1 - degree2;
+                res(idxr) = coeff1(idx1)/coeff2(degree2 + 1);
+                for jj = 1:(degree2 + 1)
+                    idxr1 = idx1 + 1 - jj;
+                    coeff1(idxr1) = coeff1(idxr1) - res(idxr)*coeff2(degree2 + 2 - jj);
+                end%jj
+            end%ii
+        end%function
+        
+        %Lagrange Polynomials
+        function coeff = LagrangeCoefficients(points,X,Y)
+            %points = #Of interpolation points.
+            %X = Values of the indeterminate.
+            %Y = Values of the determinate.
+            coeff = zeros(1,points); %Allocate memory for the final output.
+            basis = zeros(1,points); %Allocate memory for an intermediate output.
+            for ii = 1:points
+                basis = polynomial.LagrangeBasis(points,X,ii,basis);
+                for jj = 1:points
+                    coeff(jj) = coeff(jj) + basis(jj)*Y(ii);
+                end%jj
+            end%ii
+            clear basis;
+        end%function
+        function coeff = LagrangeConstituent(points,X,number,coeff)
+            %points = #Data points to fit.
+            %X = values of the indeterminates.
+            %Y = values of the determinates.
+            %coeff = buffer for the coefficients of the Lagrange constituent.
+            if isempty(coeff)
+                coeff = zeros(1,points);
+            end%if
+            R_buffer = 1;
+            roots = zeros(points,1);
+            switch number
+                case 1
+                    for ii = 2:points
+                        R_buffer = R_buffer*(X(number) - X(ii));
+                        roots(ii - 1) = X(ii);
+                    end%ii
+                case points
+                    for ii = 1:(points - 1)
+                        R_buffer = R_buffer*(X(number) - X(ii));
+                        roots(ii) = X(ii);
+                    end%ii
+                otherwise
+                    for ii = 1:(number - 1)
+                        roots(ii) = X(ii);
+                        R_buffer = R_buffer*(X(number) - X(ii));
+                    end%ii
+                    for ii = (number + 1):points
+                        roots(ii-1) = X(ii);
+                        R_buffer = R_buffer*(X(number) - X(ii));
+                    end%ii
+            end%switch
+            coeff = polynomial.ExpandRoots(points - 1,roots,coeff);
+            for ii = 1:points
+                coeff(ii) = coeff(ii)/R_buffer;
+            end%ii
+            clear roots;            
+        end%function
+        function coeff = LagrangeRebuildConstituent(points,X,old_number,new_number,coeff)
+            %Obtain Lagrange polynomial constituents from an already
+            %existing constituent and a number sequence. Computations done
+            %inplace.
+            if old_number == new_number
+                return;
             end%if
             
+            for kk = 1:2
+                number = old_numer*(kk == 1) + new_number*(kk == 2);
+                switch number
+                end
+            end%kk
             
-            clear coeff_roots;
+            
+            %First, rescale the coefficients by multiplying by 
+            for ii = 1:points
+                coeff(ii) = coeff(ii)*(1)
+            end%ii
+            
         end%function
-        %Simple O(n) Differentiation of coefficients
-        function coeff_out = Differentiate(n_coeff,coeff_in)
-            coeff_out = zeros(1,n_coeff - 1);%Allocate output buffer.
-            for ii = 2:n_coeff
-                coeff_out(ii-1) = coeff_in(ii)*(ii-1);
+        
+
+        function weight = LagrangeBarycentricWeight(points,X,number)
+            %Generates the weights for the 1st Barycentric form of the
+            %Lagrange basis.
+            weight = 1;
+            switch number
+                case 1
+                    for ii = 2:points
+                        weight = weight*(X(number) - X(ii));
+                    end%ii
+                case points
+                    for ii = 1:(points - 1)
+                        weight = weight*(X(number) - X(ii));
+                        roots(ii) = X(ii);
+                    end%ii
+                otherwise
+                    for ii = 1:(number - 1)
+                        roots(ii) = X(ii);
+                        weight = weight*(X(number) - X(ii));
+                    end%ii
+                    for ii = (number + 1):points
+                        roots(ii-1) = X(ii);
+                        weight = weight*(X(number) - X(ii));
+                    end%ii
+            end%switch
+            
+        end%function
+        function coeff = LagrangeFiniteDifference(points,sequence,derivative)
+            coeff = zeros(1,points); %Buffer to store finite difference coefficients.
+            C = zeros(1,derivative); %Buffer to store integration constants.
+            
+            %Generate the first barycentric form of the Lagrange basis
+            %polynomials.
+            barycenter = zeros(1,points+1);
+            barycenter(1) = 1;
+            degree = 0;
+            for ii = 1:points
+                barycenter = polynomial.InPlaceRootAddition(degree,barycenter,sequence(ii));
+                degree = degree + 1;
+            end%ii
+            %barycenter = polynomial.ExpandRoots(points,sequence,barycenter);
+            for ii = 1:points
+                degree = points;
+                weight = polynomial.LagrangeBarycentricWeight(points,sequence,ii);
+                %Turn the barycenter into an unweighted Lagrange basis
+                %constituent.
+                barycenter = polynomial.InPlaceRootDeletion(...
+                    degree,...
+                    barycenter,...
+                    sequence(ii));
+                degree = degree - 1;
+                
+                %THIS NEEDS TO BE UPGRADED. INSTEAD OF DIFFERENTIATING AND
+                %INTEGRATING BACK, ONE SHOULD JUST USE A MODIFIED VERSION
+                %OF HORNER'S RULE.
+                %%%%
+                %Take as many derivatives as needed.
+                for jj = 1:derivative
+                    C(jj) = barycenter(1); %Remember the coefficients lost to differentiation.
+                    barycenter = polynomial.InPlaceDifferentiation(degree,barycenter);
+                    degree = degree - 1; %Differentiation lowers the degree of the polynomial.
+                end%jj
+                coeff(ii) = barycenter(1)/weight;
+                for jj = derivative:-1:1 %Undo the derivatives by integrating
+                    barycenter = polynomial.InPlaceIntegration(degree,barycenter,C(jj));
+                    degree = degree + 1;
+                end%jj
+                %%%%
+                
+                
+                barycenter = polynomial.InPlaceRootAddition(degree,barycenter,sequence(ii));
             end%ii
         end%function
-        %Simple O(n) Integration of coefficients
-        function coeff_out = Integrate(n_coeff,coeff_in,int_const)
-            coeff_out = zeros(1,n_coeff + 1);%Allocate output buffer.
-            coeff_out(1) = int_const;
-            for ii = 1:n_coeff
-                coeff_out(ii+1) = coeff_in(ii)/ii;
-            end%ii
+        
+        %Bernstein Polynomials
+        function coeff = BernsteinConstituent
         end%function
+        
+        %Elementary calculus operations.
+        function coeff = OutOfPlaceDifferentiation(degree,coeff_in)
+            coeff = zeros(1,degree + 1);
+            for ii = 1:(degree + 1)
+                coeff(ii) = coeff_in(ii);
+            end%ii
+            coeff = InPlaceDifferentiation(degree,coeff);
+        end%function
+        function coeff = InPlaceDifferentiation(degree,coeff)
+            for ii =  2:(degree + 1)
+                iim1 = ii - 1;
+                coeff(iim1) = coeff(ii)*(iim1);
+            end%ii
+            coeff(ii) = 0; %Must zero the leading coefficient.
+        end%function
+        
+        function coeff = OutOfPlaceIntegration(degree,coeff_in,C)
+            coeff = zeros(1,degree + 2);
+            for ii = 1:(degree+2)
+                coeff(ii) = coeff_in(ii);
+            end%ii
+            coeff = polynomial.InPlaceIntegration(degree,coeff,C);
+        end%function
+        function coeff = InPlaceIntegration(degree,coeff,C)
+            for ii = (degree + 2):-1:2
+                iim1 = ii - 1;
+                coeff(ii) = coeff(iim1)/iim1;
+            end%ii
+            coeff(1) = C; %Include the integration constant.
+        end%function
+    
+
         %O(n) horizontal shift reflected on a polynomial's coefficients.
         function coeff_out = TaylorShift(n_coeff,coeff_in,shift)
             coeff_out = zeros(1,n_coeff); %Allocate output buffer.
