@@ -375,7 +375,7 @@ classdef ellipse < handle
             this.genfrom2dir1c(this.a*this.fa,this.b*this.fb,O' + (OA + OB)/(1+alpha));
             %this.e
             this.generated = true;
-        end
+        end%function
         
         %Generate the ellipse from knowledge of its quadric form.
         function genfromquadric(this,A,B,C,D,E,F,cent)
@@ -461,6 +461,7 @@ classdef ellipse < handle
         %Generate an elliptical sector subtended by lines connecting two 
         %distinct points each to the center of the ellipse.
         function xy_out = sector2P(this,p1,p2,N)
+            %{
             %Define vectors from the points to the center of the ellipse.
             dir1 =  direction2p(this.dim,p1,this.center);
             dir2 =  direction2p(this.dim,p2,this.center);
@@ -473,22 +474,36 @@ classdef ellipse < handle
             %vectors defined above.
             cos_th1a = inner_product(this.fa,dir1)/mag_1; %dir1 vs. fa.
             cos_th2a = inner_product(this.fa,dir2)/mag_2; %dir2 vs. fa.
+            %}
+            
+            %NOTE: IN THE NEAR FUTURE, "p1" and "p2" WILL BE REPLACED WITH
+            %"x1", "y1", AND "x2", "y2" RESPECTIVELY.
+            %*NEW
+            dx1 = p1(1) - this.center(1);
+            dy1 = p1(2) - this.center(2);
+            dx2 = p2(1) - this.center(1);
+            dy2 = p2(2) - this.center(2);
+            mag_1 = sqrt(dx1*dx1 + dy1*dy1);
+            mag_2 = sqrt(dx2*dx2 + dy2*dy2);
+            cos_th1a = (dx1*this.fa(1) + dy1*this.fa(2))/mag_1;
+            cos_th2a = (dx2*this.fa(1) + dy2*this.fa(2))/mag_2;
+            %*NEW
             
             %Need to determine the hemispheres that the lines belong to.
             %Remember that the directions are defined from the points
             %towards the center.
-            if inner_product(this.fb,dir1) <= 0 
+            %if inner_product(this.fb,dir1) <= 0 
+            if (this.fb(1)*dx1 + this.fb(2)*dy1) <= 0
                 angle1 = acos(-cos_th1a);
             else 
                 angle1 = -acos(-cos_th1a);
             end%if
-            
-            if inner_product(this.fb,dir2) <= 0 
+            %if inner_product(this.fb,dir2) <= 0 
+            if (this.fb(1)*dx2 + this.fb(2)*dy2) <= 0
                 angle2 = acos(-cos_th2a);
             else 
                 angle2 = -acos(-cos_th2a);
             end%if            
-            
             xy_out = sector2A(this,N,angle1,angle2);
         end%function
         
@@ -510,24 +525,36 @@ classdef ellipse < handle
             end%if
 
             d_theta = (E2 - E1)/(N-1);
-            theta = E1; %Starting angle.            
+            theta = E1; %Starting angle.      
+            %*NEW
+            crossAB = this.fa(1)*this.fb(2) - this.fb(1)*this.fa(2);
+            %*NEW
             for ii = 1:N %for all points
-                %sin_th = sin(theta);
                 cos_thA = cos(theta);
-                cos_thB = cos(pi/2 - theta);
+                cos_thB = cos(pi/2 - theta); %Should I replace this with sine?
+                %*OLD
+                %{
+                %I forget what this is....
                 dir = [this.fb(2),-this.fa(2);-this.fb(1),this.fa(1)]*[cos_thA;cos_thB]...
                     /(this.fa(1)*this.fb(2) - this.fb(1)*this.fa(2));
                 R = polar_radius_C(this,cos_thA);
                 for jj = 1:this.dim
-                  %  xy_out(ii,jj) = this.center(jj) + this.a*this.fa(jj)*cos_th + this.b*this.fb(jj)*sin_th;
                     xy_out(ii,jj) = this.center(jj) + R*dir(jj);
                 end%jj
-                theta = theta + d_theta;
+                %}
+                %*OLD
+                %*NEW
+                R = polar_radius_C(this,cos_thA);
+                xy_out(ii,1) = this.center(1) + R*(+this.fb(2)*cos_thA - this.fa(2)*cos_thB)/crossAB;
+                xy_out(ii,2) = this.center(2) + R*(-this.fb(1)*cos_thA + this.fa(1)*cos_thB)/crossAB;
+                %*NEW
+                theta = theta + d_theta; %March the angle.
             end%ii
         end%function
         
         %Determine if a point is inside ellipse.
         function inside = is_inside(this,p1)
+            %{
             %Direction from point to center.
             vec =  direction2p(this.dim,p1,this.center);
             
@@ -539,6 +566,14 @@ classdef ellipse < handle
             if inner_product(vec,vec) > polar_radius_C(this,cos_th)^2
                 inside = false;
             end%if
+            %}
+            dx = p1(1) - this.center(1);
+            dy = p1(2) - this.center(2);
+            mag2 = dx*dx + dy*dy; 
+            cos_th = (dx*this.fa(1) + dy*this.fa(2))/mag2;
+            if mag2 > polar_radius_C(this,cos_th)^2
+                inside = false;
+            end%if            
         end%function
                 
         %Polar radius measured from center.

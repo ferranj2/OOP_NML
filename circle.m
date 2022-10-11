@@ -19,7 +19,8 @@
 %% 
 % Three-point circle.
 %% 
-% $\begin{array}{c} A_{1} = x_{1} - x_{2} \\
+% $\begin{array}{c}
+% A_{1} = x_{1} - x_{2}\\
 % A_{2} = y_{1} - y_{2}\\
 % A_{3} = x_{1} - x_{3}\\
 % A_{4} = y_{1} - y_{3}\\
@@ -32,6 +33,21 @@
 %%
 % Circular fillet (blend two straight lines)
 %%
+% $\begin{array}{c}
+% A_{1} = x_{2} - x_{1}\\
+% A_{2} = x_{3} - x_{4}\\
+% A_{3} = y_{2} - y_{1}\\
+% A_{4} = y_{3} - y_{4}\\
+% \|A\| = A_{1}A_{4} - A_{3}A_{2}\\
+% L_{1} = \sqrt{A_{1}^{2} + A_{3}^{2}}\\
+% L_{2} = \sqrt{A_{2}^{2} + A_{4}^{2}}\\
+% B_{1} = x_{3} - x_{1} + R(\frac{A_{3}}{L_{1}} + \frac{A_{4}}{L_{2}})\\
+% B_{2} = y_{3} - y_{1} + R(\frac{A_{2}}{L_{2}} + \frac{A_{1}}{L_{1}})\\
+% t_{1} = \frac{A_{4}B_{1} - A_{2}B_{2}}{\|A\|}\\
+% t_{2} = \frac{A_{1}B_{2} - A_{3}B_{1}}{\|A\|}\\
+% x_{c} = x_{1} + t_{1}A_{1} - R\frac{A_{3}}{L_{1}}\\
+% y_{c} = y_{1} + t_{1}A_{3} + R\frac{A_{1}}{L_{1}}\\
+% \end{array}$
 %% Class definition
 classdef circle < handle
     %CUSTOMIZATION variables
@@ -119,9 +135,24 @@ classdef circle < handle
             this.R = sqrt((x1 - this.xc)^2 + (y1 - this.yc)^2);
             this.valid = true;
         end%function
-        function this = CreateFillet(x1,y1,dx1,dy1,x2,y2,dx2,dy2)
+        function this = CreateFilletWithRadius(x1,y1,x2,y2,x3,y3,x4,y4,R,ex,ey)
             %Create a circle as a fillet to a 2-segment corner
+            if nargin < 9
+                L1 = sqrt((x2-x1)^2 + (y2-y1)^2);
+                L2 = sqrt((x3-x4)^2 + (y4-y3)^2);
+                R = L1*(L1 <= L2) + L2*(L2 < L1);
+            end
+            if nargin < 10
+                ex = 1;
+                ey = 0;
+            end%if
             this = circle;
+            this.ex = -ex;
+            this.ex = -ey;
+            this.R = R;
+            
+            [this.xc,this.yc,t1,t2] = circle.CenterFilletSegments(x1,y1,x2,y2,x3,y3,x4,y4,R);
+            this.valid = true;
         end%function
     end%methods(Static)
     %High-level instance MODIFICATION and QUERY routines.
@@ -437,6 +468,28 @@ classdef circle < handle
     %Graphical demonstrations
     methods (Static)
         
+        %Demonstrate computation of a circular fillet.
+        function [ax,circ] = FilletDemo
+            ax = custom_axis;
+            axis(ax,'equal');
+            
+            fillet_radius = 1;
+            P1 = [0,0];
+            P2 = [2,2];
+            P3 = [-1,3];
+            P4 = [2,-2];
+            segment1 = plot(ax,[P1(1),P2(1)],[P1(2),P2(2)],'k');
+            segment2 = plot(ax,[P3(1),P4(1)],[P3(2),P4(2)],'k');
+
+            %circ = circle.CreateFilletWithRadius(P1(1),P1(2),P2(1),P2(2),P3(1),P3(2),P4(1),P4(2),1.5);
+            circ = circle.CreateFilletWithRadius(P2(1),P2(2),P1(1),P1(2),P3(1),P3(2),P4(1),P4(2),fillet_radius);
+
+            circ.SetCanvas(ax);
+            circ.Show;
+            
+            
+        end%function
+        
         %Demonstrate Circle Rolling
         function RollDemo
             ax = custom_axis;
@@ -582,11 +635,34 @@ classdef circle < handle
             %}
         end%function
         
+        %Solve for a circle's center if part of fillet
+        function [xc,yc,t1,t2] = CenterFilletSegments(x1,y1,x2,y2,x3,y3,x4,y4,R)
+            A1 = x2 - x1; %+Delta X (Segment #1)
+            A2 = x3 - x4; %-Delta X (Segment #2)
+            A3 = y2 - y1; %+Delta Y (Segment #1)
+            A4 = y3 - y4; %-Delta Y (Segment #2)
+            L1 = sqrt(A1*A1 + A3*A3); %Length of Segment #1.
+            L2 = sqrt(A2*A2 + A4*A4); %Length of Segment #2.
+            B1 = x3 - x1 + R*(A3/L1 + A4/L2);
+            B2 = y3 - y1 - R*(A2/L2 + A1/L1);
+            detA = A1*A4 - A3*A2;
+            t1 = (A4*B1 - A2*B2)/detA;
+            t2 = (A1*B2 - A3*B1)/detA;
+            
+            xc = x1 + t1*A1 - R*A3/L1;
+            yc = y1 + t1*A3 + R*A1/L1;
+        end%function
+        function [xc,yc,t1,t2] = CenterFilletLines(x1,y1,dx1,dy1,x2,y2,dx2,dy2,R)
+            A1 = x1;
+        end%function
+        
+        
         %Center's circle from midpoint.
         function [xc,yc] = Center2P(x1,y1,x2,y2)
             xc = 0.5*(x1 + x2);
             yc = 0.5*(y1 + y2);
         end%function
+        
         
         %Split a circle into evenly "area'd" pieces that resembled the
         %Shaolin symbol.
