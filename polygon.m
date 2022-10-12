@@ -41,7 +41,6 @@ classdef polygon < handle
         refresh %Structure holding boolean values that control which graphics refresh.
         updated %Structure holding boolean values that track graphics state of date.
         generated %Structure holding boolean values that track whether certain graphics are generated.
-
         refresh_rate %A parameter that determines how long (ideally) calls to Refresh shoul take.
     end%properties
     %DEFINING DATA variables
@@ -86,20 +85,20 @@ classdef polygon < handle
         %Constructor
         function this = polygon(varargin)
             %Defining and metric data.
-            this.XY = [];
-            this.simple = [];
-            this.convex = [];
-            this.open = [];
-            this.area = [];
-            this.perimeter = [];
-            this.xc = [];
-            this.yc = [];
+            this.XY = [];%KEEP
+            this.simple = [];%KEEP
+            this.convex = [];%SKIP
+            this.open = [];%KEEP
+            this.area = [];%KEEP
+            this.perimeter = [];%KEEP
+            this.xc = [];%SKIP
+            this.yc = [];%SKIP
             
             %Self-Intersections
-            this.SI = 0;
-            this.xSI = [];
-            this.ySI = [];
-            this.sSI = [];
+            this.SI = 0; %KEEP
+            this.xSI = []; %KEEP
+            this.ySI = []; %KEEP
+            this.sSI = []; %KEEP
             
             %Graphics related.
             this.sketches = struct(...
@@ -472,6 +471,26 @@ classdef polygon < handle
             this.valid = true;
             Refresh(this);
         end%function
+        function RedefineAsWeightedAverage(this,poly1,w1,poly2,w2)
+            if poly1.sides ~= poly2.sides
+                error('Input polygons do not have equal sides')
+            end%if
+            if poly1.open ~= poly2.open
+                poly.open = false;
+                warning('Input polygons have different "open" flags. Defaulting to closed.');
+            else
+                this.open = poly1.open;
+            end%if
+            this.ReCalloc(poly1.sides);
+            w = w1 + w2;%Total weight.
+            for ii = 1:poly1.sides
+                this.XY(ii,1) = (poly1.XY(ii,1)*w1 + poly2.XY(ii,1)*w2)/w;
+                this.XY(ii,2) = (poly1.XY(ii,2)*w1 + poly2.XY(ii,2)*w2)/w;
+            end%ii
+            this.Measure;
+            this.Refresh;
+            this.valid = true;
+        end%function
         function RedefineAsRegular(this)
             length = this.perimeter/this.sides;
             
@@ -562,7 +581,7 @@ classdef polygon < handle
                 this.XY(ii,1) = old_x + old_y*Sy + this.xc;
                 this.XY(ii,2) = old_y + Sx*old_x + this.yc;
             end%ii
-            this.ComputeNormals;
+            this.Measure;
             Refresh(this);
         end%function
         function Scale(this,Sx,Sy)
@@ -2591,6 +2610,19 @@ classdef polygon < handle
     %the class.
     methods (Static)
         %Elementary 2D vector and line operations.
+        %function
+            %Measure
+        %end
+        %function
+            %SmoothOpen
+        %end
+        %function
+            %SmoothClose
+        %end
+        %function
+            %CorrectSelfIntersection
+        %end
+        
         function [nx,ny] = UnitNormal2D(dx,dy)
             %Find the unit normal vector to some direction according to a
             %right-handed coordinate system.
