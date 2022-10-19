@@ -1,21 +1,34 @@
+%% AABB.m (Axis-Aligned Bounding Boxes)
+%% Description
+% Simple data structure meant as a low-order gauge on some other object's
+% size. AABB can be appended to other data structures that represent
+% geometric objects. AABB can then be used as a low-cost collission
+% detection asset. When the AABB of one object overlaps that of another,
+% higher-fidelity data structures (such as that for a polygon) should be
+% used to assess states of collision.
+%% Class definition
 classdef AABB < handle
+    %CUSTOMIZATION variables
     properties (SetAccess = public)
         name %Name of this AABB's graphics as they will appear on axes legends.
         color %Color of AABB's graphics as will be rendered in an axes object.
         canvas %Handle to the axes on which to render the AABB.
         sketches %Structure with the handles to the AABB's graphics.
     end%properties (Public)
+    %DEFINING DATA variables
     properties (SetAccess = private)
         dim %Dimension of the space this AABB exists in.
         p1 %Coordinates of the minimum point (min_x, min_y,min_z,...).
         p2 %Coordinates of the maximum point (max_x, max_y,max_z,...).
     end%properties(Private)
+    %METRIC variables
     properties (SetAccess = protected)
-        center
-        area
-        sizes
-        perimeter
+        center %The midpoint across all components.
+        sizes %The difference between p2 and p1 across all dimensions.
+        area %RENAME LATER AS "SPACE"
+        perimeter %RENAME LATER AS "BOUNDARY"
     end%properties (protected)
+    %FLAG and STATE variables.
     properties (Hidden = true)
         canvas_set %Whether this AABB was an axes set for rendering.
         graphics_initialized %Whether memory for the graphics has been allocated.
@@ -23,9 +36,8 @@ classdef AABB < handle
         degenerate %Flag AABB that share the same coordinate in p1 and p2.
         valid %Flag to see if the basic operations can be performed on the object.
     end%properties(Protected)
-    %High-level functions that MODIFY specific instances of the class
-    %object.
-    methods
+    %High-level instance CREATION routines.
+    methods (Static)
         %Constructor
         function this = AABB(varargin)
             this.name = 'AABB';
@@ -73,7 +85,48 @@ classdef AABB < handle
                 valid_input = false;
             end%while
         end%function
-        
+        %Create a random AABB from an input dimension
+        function box = CreateRandom(dim,max_sizes)
+            box = AABB;
+            if nargin == 0
+                dim = 2; %Default dimension is 2.
+            end%if
+            if nargin == 1
+                %Deliberately avoiding the use of the "ones" function
+                %because it is not available in C. "Zeros" is close enough
+                %to C's malloc.
+                max_sizes = zeros(1,dim);
+                for ii = 1:dim
+                    max_sizes(ii) = 1;
+                end%end
+            end%%if
+            box.dim = dim;
+            box.p1 = zeros(1,dim);
+            box.p2 = zeros(1,dim);
+            for ii = 1:dim
+                box.p1(ii) = rand*max_sizes(ii);
+                box.p2(ii) = rand*max_sizes(ii);
+                %In the extremely unlikely event that rand returns the same
+                %value
+                while box.p1(ii) == box.p2(ii)
+                    box.p1(ii) = rand*max_sizes(ii);
+                    box.p2(ii) = rand*max_sizes(ii);
+                    fprintf('Murphy''s Law! \n');
+                end%while
+            end %ii
+            box.authenticate;
+        end%function        
+        %Create a bounding box from a list of points.
+        function box = CreateFromList(dim,points,XY)
+            box = AABB;
+            box.dim = dim;
+            [box.p2, box.p1] = AABB.GlobalExtremaOfList(dim,points,XY);
+            box.valid = true;
+        end%function
+    end%methods (Static)
+    %High-level instance MODIFICATION and QUERY routines.
+    methods
+
         %Destructor
         %{
         function delete(this)
@@ -163,6 +216,13 @@ classdef AABB < handle
                 this.area = this.area*this.sizes(ii); %This generalizes to higher dimensions.
                 this.perimeter = this.perimeter + 2*this.sizes(ii); %This is hardcoded for 2D.
             end%for
+            
+            %{
+            for ii = 1
+                for jj = 1:nchoosek(this.dim,this.dim-1)
+                end%jj
+            end%ii
+            %}
         end%function
         
         %Check if an AABB is inside another AABB
@@ -192,14 +252,17 @@ classdef AABB < handle
             if nargin ==1
                 ax = custom_axis;
             end%if
+            %{
             if isempty(this.sketch) || ~isvalid(this.sketch)
                 this.sketch = custom_line(...
                     'Parent',ax,...
                     'LineStyle','--',...
                     'DisplayName','AABB');
             end%if
-            this.sketch.XData = [this.p1(1),this.p2(1),this.p2(1),this.p1(1),this.p1(1)];
-            this.sketch.YData = [this.p1(2),this.p1(2),this.p2(2),this.p2(2),this.p1(2)];
+            %}
+            this.sketches.Box.XData = [this.p1(1),this.p2(1),this.p2(1),this.p1(1),this.p1(1)];
+            this.sketches.Box.YData = [this.p1(2),this.p1(2),this.p2(2),this.p2(2),this.p1(2)];
+            
         end%function
         
         %Draw the AABB's center
@@ -244,17 +307,13 @@ classdef AABB < handle
                 error('AABB is in invalid state.');
             end%if
             [this.p2, this.p1] = AABB.GlobalExtremaOfList(this.dim,points,XY);
-            
             if this.graphics_initialized
+                UpdateRaw(this);
             end%if
-            
         end%function
         
     end%methods (Ordinary)
-    %High-level functions that CREATE instances of the polynomial objects
-    %from low-level code.Error checking involved.
-    
-    %Graphical setups.
+    %GRAPHICAL SETUP routines .
     methods
         %Whether this AABB object is to be drawn.
         function Show(this)
@@ -284,8 +343,6 @@ classdef AABB < handle
                 this.sketches.Center.Parent = ax;
             end%if
         end%function
-        
-        %Set the name of this AABB as it would appear in axes legends.
         function SetName(this,string)
             this.name = string;
             if this.graphics_initialized
@@ -293,8 +350,6 @@ classdef AABB < handle
                 this.sketches.Center.DisplayName = [string, 'Center'];
             end%if
         end%function
-        
-        %Set the color of the AABB's graphics.
         function SetColor(this,RGB)
             this.color = RGB;
             if this.graphics_initialized
@@ -313,6 +368,7 @@ classdef AABB < handle
                 'YData',[this.p1(2),this.p2(2),this.p2(2),this.p1(2),this.p1(2)],... %MATLAB won't allow ANY property access otherwise.
                 'Visible','on',...
                 'LineStyle','--',...
+                'Color',this.color,...
                 'DisplayName',this.name);
             
             %This will sketch the AABB's center.
@@ -323,12 +379,12 @@ classdef AABB < handle
                 'Visible','off',... 
                 'Marker','s',...
                 'MarkerEdgeColor',[0,0,0],...
-                'MarkerFaceColor',[0,0,1],...
+                'MarkerFaceColor',this.color,...
                 'DisplayName',[this.name,' Center']);
             this.graphics_initialized  = true;
         end%function.
         
-        %Show or Hide the box from the canvas.
+        %Visibility toggle functions.
         function ToggleBox(this)
             if ~this.graphics_initialized
                 return;
@@ -367,10 +423,26 @@ classdef AABB < handle
                 this.sketches.Box.YData(ii) = (this.sketches.Box.YData(ii) - this.center(2))*factor + this.center(2);
             end%ii
         end%function
-        
-        
-    end%methods(Graphics)
-    
+        function UpdateRaw(this)            
+            %Redraw the bounding boxes completely.
+            this.sketches.Box.XData = [this.p1(1),this.p1(1),this.p2(1),this.p2(1),this.p1(1)];
+            this.sketches.Box.YData = [this.p1(2),this.p2(2),this.p2(2),this.p1(2),this.p1(2)];
+               
+            %Reposition the Center.
+            this.sketches.Center.XData = 0.5*(this.p1(1) + this.p2(1));
+            this.sketches.Center.YData = 0.5*(this.p1(2) + this.p2(2));
+        end%function
+        function FrameCanvas(this,ax)
+            %Changes the X and Y limits of the axes object to match the
+            %dimensions of the AABB.
+            if nargin < 2
+                ax = this.canvas;
+            end%if
+            ax.XLim = [this.p1(1),this.p2(1)];
+            ax.YLim = [this.p1(2),this.p2(2)];
+        end%function
+
+    end%methods(Graphics)    
     %Graphical demonstrations
     methods (Static)
         %Showcase the AABB vs. AABB overlap and inclusion detection on
@@ -426,50 +498,7 @@ classdef AABB < handle
             end%ii
         end%function
     end%methods (Demonstrations)
-    
-    methods (Static)
-        %Create a random AABB from an input dimension
-        function box = CreateRandom(dim,max_sizes)
-            box = AABB;
-            if nargin == 0
-                dim = 2; %Default dimension is 2.
-            end%if
-            if nargin == 1
-                %Deliberately avoiding the use of the "ones" function
-                %because it is not available in C. "Zeros" is close enough
-                %to C's malloc.
-                max_sizes = zeros(1,dim);
-                for ii = 1:dim
-                    max_sizes(ii) = 1;
-                end%end
-            end%%if
-            box.dim = dim;
-            box.p1 = zeros(1,dim);
-            box.p2 = zeros(1,dim);
-            for ii = 1:dim
-                box.p1(ii) = rand*max_sizes(ii);
-                box.p2(ii) = rand*max_sizes(ii);
-                %In the extremely unlikely event that rand returns the same
-                %value
-                while box.p1(ii) == box.p2(ii)
-                    box.p1(ii) = rand*max_sizes(ii);
-                    box.p2(ii) = rand*max_sizes(ii);
-                    fprintf('Murphy''s Law! \n');
-                end%while
-            end %ii
-            box.authenticate;
-        end%function        
-        
-        %Create a bounding box from a list of points.
-        function box = CreateFromList(dim,points,XY)
-            box = AABB;
-            box.dim = dim;
-            [box.p2, box.p1] = AABB.GlobalExtremaOfList(dim,points,XY);
-        end%function
-        
-    end%methods (Static)
-    %High-level routines with substantial error checking to catch
-    %user-input errors.
+    %Low-level SPECIALIZED routines
     methods (Static)
         %Create from an AABB from two points.
         function this = Create2P(dim,p1,p2)
@@ -534,8 +563,8 @@ classdef AABB < handle
         end%function
         
     end%methods(Static)
-    %Low-level functions with no error checking specific to this class.
-    methods(Static)
+    %Low-level "QUALITY OF LIFE" routines
+    methods (Static)
         % Check whether the bounding boxes overlap. This method does not
         % check if one AABB is inside the other.
         function overlap = BoxesOverlap(dim,p1,p2,p3,p4)

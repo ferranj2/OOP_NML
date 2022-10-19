@@ -467,7 +467,7 @@ classdef polygon < handle
                 this.XY(ii,1) = XY(ii,1);
                 this.XY(ii,2) = XY(ii,2);
             end%ii
-            Measure(this);
+            Measure(this);           
             this.valid = true;
             Refresh(this);
         end%function
@@ -615,8 +615,9 @@ classdef polygon < handle
                 end%if
                 this.SmoothOpen(lambda,N);
             end%if
+            
             this.Measure;            
-            Refresh(this);            
+            this.Refresh;            
         end%function
         function Disperse(this,lambda,N)
         end%function
@@ -1020,7 +1021,6 @@ classdef polygon < handle
             end%if
         end%function
         %Move to low-level
-        
         function SmoothHighOrder(this,lambda,N)
             %Applies discrete Laplacian Smoothing to the polygon according
             %to a finite difference scheme for approximating the 2nd
@@ -1052,125 +1052,339 @@ classdef polygon < handle
             end%if
             
         end%function
-        
         function DetectSharpTurns(this,Rf)
             %This routine applies a "rolling" circle type of operation to
             %flag turns that exceed the radius of the tighest turn that the
             %polygon should make.
-            bad_points = zeros(1,this.sides); %Allocate memory for an array of flags.
-            %Sort the polygon by Coordinates
-            [X_sorted,X_perm] = sort(this.XY(:,1));
+            
+            bad_points = ones(1,this.sides); %Allocate memory for an array of flags.
             
             %For this to work, the polygon must be oriented inwards.
-            if ~this.orientation
-                ReverseNormals(this);
+            if this.orientation
+                Rf = -Rf;
+                %this.ReverseNormals;
             end%if
+            %mult*
             
+            
+
+            %Sort either X or Y coordinates.
+            [X_sorted,X_perm] = sort(this.XY(:,1));
             %Need to first find the where the first point ranks in the
             %sorted list.
             needle = 1;
             while X_perm(needle) ~= 1
                 needle = needle + 1;
+                if needle == length(X_perm)
+                    needle = 1;
+                end%if
             end%while
             old_needle = needle;
 
-            %Initialize the circle's center
-            %XC1 = this.XY(ii,1) + Rf*this.nxy(1,1);
-            %YC1 = this.XY(ii,2) + Rf*this.nxy(ii,2);
-            for ii = 1:(this.sides - 1)
-                iip1 = ii + 1;
-                XC1 = this.XY(ii,1) + Rf*this.nxy(ii,1);
-                YC1 = this.XY(ii,2) + Rf*this.nxy(ii,2);
-                XC2 = this.XY(iip1,1) + Rf*this.nxy(iip1,1);
-                YC2 = this.XY(iip1,2) + Rf*this.nxy(iip1,2);
-                dx = XC2 - XC1; %Change in the x-coordinate of the polygon as it rolled.
-                dy = YC2 - YC1; %Change in the y-coordinate of the polygon as it rolled.
-                
-                %Inspect the sign of "dx"
-                if dx < 0
-                    while X_perm(needle) ~= ii
-                        %needle = (needle - 1)*(needle > 1) + this.sides*(needle == 1);
-                        needle = needle - 1;
-                        if needle == 0 %Keep index within bounds.
-                            needle = poly.sides;
+            flags = scatter3(...
+                this.canvas,...
+                this.XY(:,1),...
+                this.XY(:,2),...
+                NaN(this.sides,1),...
+                'Marker','s',...
+                'MarkerEdgeColor',[0,0,0],...
+                'MarkerFaceColor',[1,1,0]);
+                        
+            %Definition of the "Rolling Circle."                      
+            F = circle.CreateXYR(...
+                0.5*(this.XY(1,1) + this.XY(2,1)) + Rf*this.nxy(1,1),... %X-center.
+                0.5*(this.XY(1,2) + this.XY(2,2)) + Rf*this.nxy(1,2),... %Y-center
+                abs(Rf));%Radiues
+            F.SetCanvas(this.canvas);
+            F.Show;
+            F.sketches.Curve.Color = [1,1,0];
+            F.sketches.Orientation.Visible = 'on';
+            F.sketches.Orientation.Color = [1,1,0];
+            for kk = 1:3
+                switch kk
+                    case 1
+                        start = 1;
+                        step1 = 1;
+                        step2 = 2;
+                        finish = this.sides - 2;
+                    case 2
+                        if this.open
+                            break;
+                        else
+                            start = this.sides - 1;
+                            step1 = 1;
+                            step2 = 2 - this.sides;
+                            finish = this.sides - 1;
                         end%if
-                    end%while
-                    old_needle = needle;
-                    needleL = needle - 1; %Need a counter to subtract from the first needle.
-                    while X_sorted(needleL) > (XC2 - Rf) %&& X_sorted(1) > (F.xc - F.R)
-                        dxc = this.XY(X_perm(needleL),1) - XC2; %Distance from center to leftward point.
-                        dyc = this.XY(X_perm(needleL),2) - yc2; %
-                        bad_points(X_perm(needleL)) = ((dxc*dxc + dyc*dyc) < Rf); 
-                        needleL = needleL -1;
+                    case 3
+                        if this.open
+                            break;
+                        else
+                            start = this.sides;
+                            step1 = 1 - this.sides;
+                            step2 = 2 - this.sides;
+                            finish = this.sides;
+                        end%if
+                end%switch
+                for ii = start:step1:finish
+                    iip1 = ii + step1;
+                    iip2 = ii + step2;
+                    xc2 = 0.5*(this.XY(iip1,1) + this.XY(iip2,1)) + 0.95*Rf*this.nxy(iip1,1);
+                    yc2 = 0.5*(this.XY(iip1,2) + this.XY(iip2,2)) + 0.95*Rf*this.nxy(iip1,2);
+                    
+                    %Compute Arc length traversed. (ANIMATION + FUNCTIONALITY)
+                    dsx = this.XY(iip1,1) - this.XY(ii,1);
+                    dsy = this.XY(iip1,2) - this.XY(ii,2);
+                    ds = sqrt(dsx*dsx + dsy*dsy);
+                    F.RotateByArc(ds);
+
+                    %Compute distance moved by the center (ANIMATION + FUNCTIONALITY)
+                    dxc = xc2 - F.xc;
+                    dyc = yc2 - F.yc;
+                    F.Displace(dxc,dyc);
+
+                    %needle = old_needle;
+                    if dxc < 0
+                        %Locate the needle of the next point. Look in the negative sort
+                        %direction as the change in coordinate is negative.
+                        while X_perm(needle) ~= ii
+                            %{
+                            needle = needle - 1;
+                            if needle == 0 %Keep index within bounds.
+                                needle = this.sides;
+                            end%if
+                            %}
+                            needle = (needle - 1)*(needle > 1) + this.sides*(needle == 1);
+                        end%while
+                        old_needle = needle;
+                    elseif dxc > 0
+                        %Locate needle of the next point. Since the change is positive,
+                        %look forwards.
+                        while X_perm(needle) ~= ii
+                            %{
+                            needle = needle + 1;
+                            if needle == this.sides + 1 %Keep index within bounds.
+                                needle = 1;
+                            end%if
+                            %}
+                            needle = (needle + 1)*(needle < this.sides) + 1*(needle == this.sides);
+                        end%while
+                        old_needle = needle;
+                    else %if dxc = 0
+                        fprintf('Cannot handle vertical lines yet! (Murphy''s Law)\n');
+                    end%if
+                    
+                    %Needle found, now, check all the points in the negative sort
+                    %direction that are within xc - R.
+                    needleL = needle; %Need a counter to subtract from the first needle.
+                    while X_sorted(needleL) > (F.xc - F.R) %&& X_sorted(1) > (F.xc - F.R)
+                        if F.ContainsPoint(this.XY(X_perm(needleL),1),this.XY(X_perm(needleL),2))
+                            flags.ZData(X_perm(needleL)) = 0;%"Un-NaN" the marker.
+                            bad_points(X_perm(needleL)) = -1;
+                        end%if
+                        needleL = needleL - 1;
                         if needleL == 0 %If even the minimum X-value is to the left, break.
                             %needleL = poly.sides;
                             break;
                         end%if
                     end%while
-                end%if
-                if dx == 0
                     
-                end%if
-                if dx > 0
-                    while X_perm(needle) ~= ii
-                        needle = needle + 1;
-                        if needle == poly.sides + 1 %Keep index within bounds.
-                            needle = 1;
+                    %Cheack nearby "right" points.
+                    needleR = needle;
+                    while X_sorted(needleR) < (F.xc + F.R) %&& X_sorted(poly.sides) < (F.xc + F.R)
+                        if F.ContainsPoint(this.XY(X_perm(needleR),1),this.XY(X_perm(needleR),2))
+                            flags.ZData(X_perm(needleR)) = 0;%"Un-NaN" the marker.
+                            bad_points(X_perm(needleR)) = -1;
+                        end%if
+                        needleR = needleR + 1;
+                        if needleR == (this.sides + 1)
+                            %needleR = 1;
+                            break;
                         end%if
                     end%while
-                    old_needle = needle;
-                end%if
-                                
-                
-                
-                
-                
-                
-                
-                needle = old_needle;
-            end%ii
-            
-            
-            
-            
-            
-            
-            %The algorithm for an open polygon is slightly different.
-            if this.open
-                
-            else %Closed polygon.
-                
-                
-                
-                
-                
-                for kk = 1:3
-                    kkis1 = kk == 1;
-                    kkis2 = kk == 2;
-                    kkis3 = kk == 3;
-                    %{
-                    start  = kkis1*this.sides;
-                    step   = kkis1*(2 - this.sides);
-                    finish = kkis1*2;
-                    %}
-                    
-                    start  = kkis1*1;
-                    trail  = kkis1*(this.sides - 1);
-                    ahead  = kkis1*1;
-                    finish = kkis1*1;
-                    
-                    
-                    for ii = start:head:finish
-                        iim1 = start + trail;
-                        iip1 = start + ahead;
+                    needle = old_needle;
+                    %input('Next?')
+                    pause(0.0001);
+                end%ii
+            end%kk
+
+            %Filter any ghost points
+            for kk = 1:3
+                switch kk
+                    case 1
+                        start = 2;
+                        back = 1; %back
+                        next = 1;
+                        finish = this.sides - 1;
+                    case 2
+                        start = this.sides;
+                        back = 1;
+                        next = 1 - this.sides;
+                        finish = 2;
                         
-                    end%ii
-                end%kk
+                    case 3
+                        start = 1;
+                        next = 1;
+                        back = 1 - this.sides;
+                        finish = 1;
+                end%switch
+                for ii = start:next:finish
+                    if bad_points(ii - back) == -1 && bad_points(ii + next) == -1
+                        bad_points(ii) = -1;
+                        flags.ZData(ii) = 0;
+                    end%if
+                end%ii
+                if this.open
+                    break;
+                end%if
+            end%for
+
+            %%%%%%%%%%%%%SECOND ATTEMPT
+
+            %Extract bands of continuous bad flags.
+            [L,idx] = polygon.DetectSignChanges(this.sides,bad_points);
+            idx
+            
+            %If the number of sign changes is even, then the the beginning
+            %points do not form a tight turn. If the number of sign changes
+            %is odd, it is possi
+            targets = floor(0.5*L) + (bad_points(1) ~= bad_points(this.sides));
+            bands = 0;
+            kk = 1;
+            %while bands < targets
+            while kk < L
+                if bad_points(idx(kk)) == +1
+                    %Skip points with a "+1."
+                    kk = kk + 1;
+                else %A point with "-1" is found.
+                    N = idx(kk + 1) - idx(kk);
+                    %{
+                    [this.XY,status,circ] = polygon.CircularFilletBlend(...
+                        this.sides,...
+                        this.XY,...
+                        N,... %Number of points to put on Filet.
+                        (idx(kk):(idx(kk+1)-1)),... %Indices to fillet.
+                        abs(Rf),... %Fillet Radius.
+                        this.XY(idx(kk)-1,1)    ,this.XY(idx(kk)-1,2),...   %x1,y1
+                        this.XY(idx(kk),1)      ,this.XY(idx(kk),2),...     %x2,y2
+                        this.XY(idx(kk + 1),1)  ,this.XY(idx(kk + 1),2),... %x3,y3
+                        this.XY(idx(kk + 1)+1,1),this.XY(idx(kk + 1)+1,2)); %x4,y4
+                    %}
+                    status = false;
+                    if ~status
+                        fprintf('Circular fillet failed! Switching to LEE blend.\n');
+                        
+                        idx_m = round(0.5*(idx(kk) + (idx(kk+1)-1))); %index of some middle point.
+                        
+                        [this.XY,status,elli] = polygon.EllipticalFilletBlend(...
+                            this.sides,...
+                            this.XY,...
+                            N,(idx(kk):(idx(kk+1)-1)),...
+                            1,...
+                            this.XY(idx(kk)-1,1)    ,this.XY(idx(kk)-1,2),...   %x1,y1
+                            this.XY(idx(kk),1)      ,this.XY(idx(kk),2),...     %x2,y2
+                            this.XY(idx(kk + 1),1)  ,this.XY(idx(kk + 1),2),... %x3,y3
+                            this.XY(idx(kk + 1)+1,1),this.XY(idx(kk + 1)+1,2),... %x4,y4
+                            idx_m); 
+                        elli.Draw(this.canvas,100);
+                        elli.DrawMajorRadius(this.canvas);
+                        elli.DrawMinorRadius(this.canvas)
+                        elli.sketch.Color = this.color;
+                        elli.sketch.LineStyle = '--';
+                    else
+                        circ.SetCanvas(this.canvas);
+                        circ.SetColor([1,1,1]);
+                        circ.Show;
+                    end
+                    
+                    
+                    kk = kk + 2;
+                    bands = bands + 1;
+                end%if
+            end%while
+            
+            %If the first sign change is from "-1" to "+1" there is a
+            %possibility that a tight turn encompasses beginning and ending
+            %indices.
+            if ~this.open && L > 0
+                if bad_points(idx(1)) == +1 && bad_points(idx(L)) == -1
+                %If the curve is open, ignore it. Else, look into it.
+                N = this.sides - idx(L) + idx(1);
+               % bll = [idx(L):this.sides,1:(idx(1)-1)];
+                idx_m = 1;
+                [this.XY,status,elli] = polygon.EllipticalFilletBlend(...
+                            this.sides,...
+                            this.XY,...
+                            N,[idx(L):this.sides,1:(idx(1)-1)],...
+                            1,...
+                            this.XY(idx(L)-1,1),this.XY(idx(L)-1,2),...   %x1,y1
+                            this.XY(idx(L),1)  ,this.XY(idx(L),2),...     %x2,y2
+                            this.XY(idx(1),1),this.XY(idx(1),2),... %x3,y3
+                            this.XY(idx(1)+1,1)  ,this.XY(idx(1)+1,2),...
+                            idx_m); %x4,y4
+                
+                        elli.Draw(this.canvas,100);
+                        elli.DrawMajorRadius(this.canvas);
+                        elli.DrawMinorRadius(this.canvas)
+                        elli.sketch.Color = this.color;
+                        elli.sketch.LineStyle = '--';
+                    
+                end%if
             end%if
             
             
+            
+            this.Measure;
+            %%%%%%%%%%%%%SECOND ATTEMPT
+
+            
+            %%%%%%%%%%%%%FIRST ATTEMPT
+            %{
+            if mod(L,2) == 1 %Odd-numbered sign changes can be are due to sharp turn
+                for ii = L-1:-2:1
+                    iim1 = ii - 1;
+                    iip1 = ii + 1;
+                    points = idx(ii) - idx(iim1); %Number of faulty points.
+
+                end%ii
+                %[XY,status,circ] = CircularFilletBlend(XY,N,idx,Rf,x1,y1,x2,y2,x3,y3,x4,y4)
+            else %Even number of sign changes.
+                for ii = L:-2:2
+                    iim1 = ii - 1;
+                    iip1 = ii + 1;
+                    points = idx(ii) - idx(iim1); %Number of faulty points.
+                    tgt1 = idx(ii);
+                    tgt2 = idx(iim1) - 1;
+                    if points > 2
+                        %Make this into a function.
+                        %Midpoint
+                        m_x = 0.5*(this.XY(tgt2,1) + this.XY(tgt1,1));
+                        m_y = 0.5*(this.XY(tgt2,2) + this.XY(tgt1,2));
+                        ex = this.XY(round(0.5*(tgt1 + tgt2)),1) - m_x;
+                        ey = this.XY(round(0.5*(tgt1 + tgt2)),2) - m_y;
+                        quiver(this.canvas,m_x,m_y,ex,ey,'Color',[1,1,1],'linewidth',1);
+                        
+                        blender = circle.CreateFilletWithRadius(...
+                            this.XY(idx(iim1) - 1,1),this.XY(idx(iim1) - 1,2),...
+                            this.XY(idx(iim1),1)    ,this.XY(idx(iim1),2),...
+                            this.XY(idx(ii) - 1,1)  ,this.XY(idx(ii) - 1,2),...
+                            this.XY(idx(ii),1)      ,this.XY(idx(ii),2),...
+                            Rf,ex,ey);
+                        %Make this into a function
+                        blender.SetColor([1,1,1]);
+                        blender.sketches.Curve.Color = [1,0,0];
+                        blender.SetCanvas(this.canvas);
+                        blender.Show;
+                    end%if
+                end%ii
+            end%if
+            %}
+            %%%%%%%%%%%%%FIRST ATTEMPT
+  
+            
+            delete(F); %Deallocate the circle
+            %delete(flags); %Deallocate the flags.
         end%function
-        
         function AddNoise(this,mag)
             for ii = 1:this.sides
                 this.XY(ii,1) = this.XY(ii,1) + rand*mag;
@@ -1282,7 +1496,11 @@ classdef polygon < handle
             %that the first point of the polygon has the minimum X and Y
             %values for coordinates.
             this.convex = (sign_xchange + sign_ychange - (min_x ~= this.XY(1,1)) - (min_y ~= this.XY(1,2)) == 2);        
-            ComputeNormals(this);
+            ComputeNormals(this); %DEPRECATE
+            
+            if this.AABB_present
+                this.aabb.RedefineFromList(this.sides,this.XY)
+            end%if 
             
             %Check whether the polygon self-intersects.
             if this.sides == 3
@@ -1334,38 +1552,6 @@ classdef polygon < handle
        
         end%function
         
-        %DEPRECATE?
-        function kappa = Curvature(this)
-            kappa = zeros(this.sides,1);
-            last_x = this.XY(this.sides,1);
-            last_y = this.XY(this.sides,2);
-            for kk = 1:2
-                kkis1 = kk == 1;
-                kkis2 = kk == 2;
-                start = 1*kkis1 + this.sides*kkis2;
-                step = 1*kkis1 + (1 - this.sides)*kkis2;
-                finish = (this.sides - 1)*kkis1 + 2*kkis2;
-                for ii = start:step:finish
-                    iip1 = ii + step;
-                    next_x = this.XY(iip1,1);
-                    next_y = this.XY(iip1,2);
-
-                    %fit 3-point circle.
-                    [XC,YC] = circle.Center3P(...
-                        last_x,last_y,...
-                        this.XY(ii,1),this.XY(ii,2),...
-                        next_x,next_y);
-                    
-                    %Compute the curvature of the circle.
-                    kappa(ii) = 1/sqrt((last_x - XC)^2 + (last_y - YC)^2);
-                    
-                    %Update the buffer to remember "old" values.
-                    last_x = this.XY(ii,1);
-                    last_y = this.XY(ii,2);
-                end%ii
-            end%kk
-        end%function
-        %DEPRECATE?
         
         %Query routines
         function inside = IsInside(this,XY_in)
@@ -1635,7 +1821,7 @@ classdef polygon < handle
                 this.sketches.Vertex_Labels(ii).Visible = 'off';
                 this.sketches.Vertex_Labels(ii).Interpreter = 'latex';
                 this.sketches.Vertex_Labels(ii).String = {...
-                    ['V$_{',num2str(ii),'}$'];'(',num2str(this.XY(ii,1)),';',num2str(this.XY(ii,2)),')'};
+                    ['V$_{',num2str(ii),'}$'],['(',num2str(this.XY(ii,1)),';',num2str(this.XY(ii,2)),')']};
             end%ii
             this.vertex_labels_on = true;            
         end%function
@@ -1783,6 +1969,7 @@ classdef polygon < handle
                 end%if
             end
         end%function
+        %NEEDS TO BE UPDATED
         function VisibilityToggle(this,handle)
             if ~this.graphics_initialized
                 warning(['Cannot toggle ',handle.DisplayName,' of polygon "',this.name,'" (graphics uninitialized).']);
@@ -1798,6 +1985,7 @@ classdef polygon < handle
                 handle.Visible = 'on';
             end%if
         end%function
+        %NEEDS TO BE UPDATED
         function ToggleAABB(this)
             if ~this.AABB_present
                 warning('File AABB.m is not present in the same folder as polygon.m.')
@@ -1916,8 +2104,8 @@ classdef polygon < handle
         end%function
         function RefreshVertexLabels(this)
             for ii = 1:this.sides
-                this.sketches.Vertex_Labels.Position(1) = this.XY(ii,1);
-                this.sketches.Vertex_Labels.Position(2) = this.XY(ii,2);
+                this.sketches.Vertex_Labels(ii).Position(1) = this.XY(ii,1);
+                this.sketches.Vertex_Labels(ii).Position(2) = this.XY(ii,2);
             end%ii
             this.updated.Vertex_Labels = true;
         end%function
@@ -2107,10 +2295,12 @@ classdef polygon < handle
 
             load('fiber_copy.mat');
             
-            fiber_number = 19;
+            fiber_number = 37;
             fiber = fiber_copy{fiber_number};
             fiber(:,1) = fiber(:,1) - min(fiber(:,1));
             fiber(:,2) = fiber(:,2) - min(fiber(:,2));
+            
+            %Reverse orientation
             %fiber(:,1) = flip(fiber(:,1));
             %fiber(:,2) = flip(fiber(:,2));
 
@@ -2155,6 +2345,8 @@ classdef polygon < handle
                 ax,...
                 [0,NaN,NaN,0],...
                 [0,NaN,NaN,0],...
+                'Color',[0,0,1],...
+                'Linewidth',1,...
                 'LineStyle','-');
             
             centroid = line(...
@@ -2222,7 +2414,7 @@ classdef polygon < handle
                     centroid_label.Position(2) = Cy;
                     centroid_label.String = ['(',num2str(Cx),',',num2str(Cy),')'];
                     
-                    pause(0.005);
+                    pause(0.001);
                 end%ii
             end%kk
             Atot = 0.5*Atot;
@@ -2239,7 +2431,12 @@ classdef polygon < handle
             
             poly.Measure;
             poly.Toggle('Normals');
-        end%function        
+            %poly.GenerateVertexLabels;
+            %poly.Toggle('Vertex_Labels')
+        end%function
+        function [ax,poly] = TestSmoothing
+
+        end%function
         function [ax,poly] = TestNoiseSmoothing
             %Create a regular polygon. Add randomized noise to its coordinates
             %and then apply several passes of Laplacian Smoothing.
@@ -2258,7 +2455,7 @@ classdef polygon < handle
             poly.SetCanvas(ax);
             poly.SetColor([0,1,0]);
             poly.Show;
-            %poly1.Toggle('Normals');
+            poly.Toggle('Normals');
             
             set(ax,'XLim',[min(poly.XY(:,1)),max(poly.XY(:,1))]);
             set(ax,'YLim',[min(poly.XY(:,2)),max(poly.XY(:,2))]);
@@ -2276,7 +2473,7 @@ classdef polygon < handle
                 title(ax,['#Distortions = ',num2str(ii)]);
                 poly.AddNoise(0.75);
                 fprintf('%10f\t%10f\t%10f\t%10f \n',poly.area,poly.perimeter,poly.xc,poly.yc);
-                pause(0.5);
+                pause(0.05);
             end%ii
             
             title(ax,'Proceed to smooth the Polygon?');
@@ -2359,8 +2556,134 @@ classdef polygon < handle
     %Low-level functions with no error checking specific to this class.
     methods (Static)
         
-        %Standalone computation of the polygon's area.
+        %Blending functions (take two segments and blend points in between)
+        function [XY,status,circ] = CircularFilletBlend(sides,XY,N,idx,Rf,x1,y1,x2,y2,x3,y3,x4,y4)
+            %INPUTS:
+            %sides: #of sides in the polygon.
+            %XY: coordinates of the polygon.
+            %x1,y1: coordinates of the start point of segment 1.
+            %x2,y2: coordinates of the end point of segment 1.
+            %x3,y3: coordinates of the start point of segment 2.
+            %x4,y4: coordinates of the end point of segment 2.
+            %Rf: fillet radius.
+            %N: %# of discrete points to evaluate on the fillet.
+            %idx: Indices into XY where to replace the points.
+            
+            %OUTPUTS:
+            %XY: Coordinates with edited values.
+            %status: Whether the fillet was successful (if it failed, the
+            %data is not edited).
+            
+            status = true; %If it fails, it gets set to false later.
+            dx1 = x2 - x1;
+            dy1 = y2 - y1;
+            dx2 = x4 - x3;
+            dy2 = y4 - y3;
+            
+            %Must know if the segments are oriented roughly in the same
+            %direction. If so, flip the orientation of one of them.
+            if dx1*dx2 + dy1*dy2 > 0 
+                [x1,x2] = polygon.swap(x1,x2);
+                [y1,y2] = polygon.swap(y1,y2);
+            end%if
+            
+            %Compute an orientation.
+            ex = 0.5*(x2 - x1 - (x4 - x3));
+            ey = 0.5*(y2 - y1 - (y4 - y3));
+            [xc,yc,t1,t2,th1,th2] = circle.CenterFilletSegments(...
+                x1,y1,...
+                x2,y2,...
+                x3,y3,...
+                x4,y4,...
+                Rf,ex,ey);
+            if t1 < 0 || t1 > 1 || t2 < 0 || t2 > 1
+                %If this first fillet attempt failed, it could be because the
+                %first guess for "ex" and "ey" was wrong. The fillet is
+                %recomputed with orientation reversed.
+                ex = -ex;
+                ey = -ey;
+                [xc,yc,t1,t2,th1,th2] = circle.CenterFilletSegments(...
+                    x1,y1,...
+                    x2,y2,...
+                    x3,y3,...
+                    x4,y4,...
+                    Rf,ex,ey);
+                if t1 < 0 || t1 > 1 || t2 < 0 || t2 > 1
+                    %If it failed again, there is no solution.
+                    status = false;
+                end%if
+            end%if
+            if nargout > 2
+                circ = circle.CreateXYR(xc,yc,Rf);
+            end%if
+            if status %edit only if successful.
+                XY(idx,:) = circle.polar_loop(xc,yc,Rf,th1,th2,N);
+                
+                %See if the las two segments intersect.
+                [~,~,t1,t2] = polygon.Intersect2p2p(...
+                    XY(idx(1)-1,1) ,XY(idx(1)-1,2),...
+                    XY(idx(1),1)  ,XY(idx(1),2),...
+                    XY(idx(N),1)  ,XY(idx(N),2),...
+                    XY(idx(N)+1,1),XY(idx(N)+1,2));
+                if t1 < 1 && t2 < 1 && t1 > 0 && t2 > 0
+                    %Segments intersect, therefore, the blending points were
+                    %assigned in reverse order. Proceed to flip the order.
+                    XY(idx,1) = flip(XY(idx,1));
+                    XY(idx,2) = flip(XY(idx,2));
+                end%if
+            end%if
+            
+        end%function
+        function [XY,status,elli] = EllipticalFilletBlend(sides,XY,N,idx,K,x1,y1,x2,y2,x3,y3,x4,y4,idx_m)
+            %idx_m index of a point towards center of the tight turn.
+            
+            elli = ellipse.CreateLeastEccentricFillet(...
+                x1,y1,...
+                x2-x1,y2-y1,...
+                x3,y3,...
+                x4-x3,y4-y3);
+            status = true;
+            
+            %idx_m = round(0.5*(idx(1) + idx(N))); %index of some middle point.
+            dxc = elli.xc - XY(idx_m,1);
+            dyc = elli.yc - XY(idx_m,2);
+            if dxc*elli.eax + dyc*elli.eay > 0
+                elli.flip_a;
+            end%if
+
+            %OLD
+            %{
+            A = [XY(idx(1),1),XY(idx(1),2)];
+            E = [XY(idx(N),1),XY(idx(N),2)];
+            XY(idx,:) = elli.sector2P(A,E,N);
+            %}
+            
+            start = idx(1)-1;
+            finish = idx(N)+1;
+            A = [XY(start,1),XY(start,2)];
+            E = [XY(finish,1),XY(finish,2)];
+            temp = elli.sector2P(A,E,N+2);
+            %XY([start,idx,finish],:) = elli.sector2P(A,E,N+2);
+            XY(idx,:) = temp(2:end-1,:);
+  
+            %See if the las two segments intersect.
+            [~,~,t1,t2] = polygon.Intersect2p2p(...
+                XY(idx(1)-1,1),XY(idx(1)-1,2),...
+                XY(idx(1),1)  ,XY(idx(1),2),...
+                XY(idx(N),1)  ,XY(idx(N),2),...
+                XY(idx(N)+1,1),XY(idx(N)+1,2));
+            if t1 < 1 && t2 < 1 && t1 > 0 && t2 > 0
+                %Segments intersect, therefore, the blending points were
+                %assigned in reverse order. Proceed to flip the order.
+                XY(idx,1) = flip(XY(idx,1));
+                XY(idx,2) = flip(XY(idx,2));
+            end%if
+            
+        end%function
+        
+        %Standalone measuring functions.
         function A = Area(sides,XY)
+            %Standalone computation of the polygon's area.
             A = 0; %Initialize running buffer for the area.
             for ii = 1:(sides - 1) %Loop computes area as if elements were quads.
                 iip1 = ii + 1;
@@ -2368,9 +2691,8 @@ classdef polygon < handle
             end%for            
             A = A/2; %Halve the area to compute as triangles.
         end%function
-        
-        %Standalone computation of the polygon's perimeter.
         function P = Perimeter(sides,XY)
+            %Standalone computation of the polygon's perimeter.
             P = 0; %Initialize running counter for the perimeter.
             for ii = 1:(sides - 1) %This loop is valid for all sides but one.
                 iip1 = ii + 1;
@@ -2382,9 +2704,14 @@ classdef polygon < handle
             P = P + sqrt((XY(1,1) - XY(sides,1))^2 +...
                     (XY(1,2) - XY(sides,2))^2);
         end%function
-        
-        %Compute the Area and Perimeter simultaneously.
+        function K = Curvature(sides,XY,K)
+            %sides: Number of sides in the polygon.
+            %XY: Coordinates of the polygon.
+            %K: Discrete curvature measure.
+            
+        end%function
         function [A,P] = AreaPerimeter(sides,XY)
+            %Compute the Area and Perimeter simultaneously.
             %Since they share the same loop structure....
             P = 0; %Initialize running counter for the perimeter.
             A = 0; %Initialize running buffer for the area.
@@ -2399,9 +2726,11 @@ classdef polygon < handle
             P = P + sqrt((XY(1,1) - XY(sides,1))^2 +...
                     (XY(1,2) - XY(sides,2))^2);
         end%function
-        
-        %Self-Intersections
         function [SI,XY_SI,seg] = DetectSelfIntersections(sides,XY)
+            %Inspect the polygon for self-intersections.
+            %WARNING: THIS IS MY OWN ATTEMPT AT MAKING A SELF-INTERSECTION
+            %DETECTOR. IT IS SLOW O(n^2), NOT THE BEST.
+            %MUST UPGRADE TO SORT-ASSISTED SEARCH.
             if sides < 3
                 error('Polygon with less than 3 sides?');
             end%if
@@ -2609,20 +2938,7 @@ classdef polygon < handle
     %Elementary low-level functions that are not unique in application to
     %the class.
     methods (Static)
-        %Elementary 2D vector and line operations.
-        %function
-            %Measure
-        %end
-        %function
-            %SmoothOpen
-        %end
-        %function
-            %SmoothClose
-        %end
-        %function
-            %CorrectSelfIntersection
-        %end
-        
+        %Basic Geometry features.
         function [nx,ny] = UnitNormal2D(dx,dy)
             %Find the unit normal vector to some direction according to a
             %right-handed coordinate system.
@@ -2646,12 +2962,51 @@ classdef polygon < handle
             x = x1 + t1*dx1;
             y = y1 + t1*dy1;
         end%function
-        
+
         %"Quality of Life" routines.
         function CleanSlate
             clc;
             clear;
             close all;
+        end%function
+        function [A,B] = swap(A,B)
+            buffer = B;
+            B = A;
+            A = buffer;
+            clear buffer;
+        end%function
+        function sign = Signum(x)
+            %Branchless sign function.
+            sign = (x > 0) - (x < 0);
+        end%function       
+        function [L,idx] = DetectSignChanges(len,array)
+            %Given an array, this routines finds all the indices where a
+            %sign change occurs. The indices are for the element
+            %immediately before another element of different sign.
+            
+            %INPUTS:
+            %len: Array length.
+            %array: The array.
+            
+            %OUTPUTS:
+            %L: # of sign changes detected.
+            %idx: The indices into "array" immediately before a sign
+            %change.
+            ii = 1;%Initialize an indexer into the array.
+            sign1 = polygon.Signum(array(1)); %Get the sign of the first element.
+            idx_chain = dchain;
+            while ii < len
+                ii = ii + 1;
+                sign2 = polygon.Signum(array(ii));
+                if sign2 ~= sign1 && sign2 ~= 0
+                    idx_chain.append(dlink(ii),'right');
+                    sign1 = sign2;
+                end%if
+            end%while
+            
+            
+            L = idx_chain.length;
+            idx = idx_chain.chain2array;
         end%function
     end%methods (Static)
 end%classdef

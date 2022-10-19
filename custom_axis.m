@@ -1,7 +1,9 @@
 function ax = custom_axis(f)
 if nargin == 0
-    f = figure;
-end
+    f = figure(...
+        'Units','pixels',...
+        'Position',[34 127.5000 560 420]);
+end%if
 ax = axes('Parent',f);
 hold(ax,'on');
 ax.BoxStyle = 'full';
