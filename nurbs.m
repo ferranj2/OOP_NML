@@ -1,11 +1,49 @@
+%% nurbs.m (Non-Uniform Rational Basis Splines)
+%  Written by J.A. Ferrand B.Sc (ID: 2431646)
+%  Embry-Riddle Aeronautical University - Daytona Beach
+%  College of Engineering (COE)
+%  Department of Aerospace Engineering (AE)
+%% Description
+% NURBS are a collection of a sequence of control points, a corresponding
+% sequence of weights, and a "many-to-one" corresponding sequence of 
+% "knots" that parametrically define a curve in n-dimensional space as a 
+% function of a single parameter. The "knots" are the discrete observations
+% of the defining parameter, whereas the control points are the discrete
+% observations of quantities of interest (typically XYZ coordinates). The
+% weight sequence is a localized tuning parameter which attracts or repels
+% the curve (to and from respectively) specific control points. Finally,
+% NURBS are characterized by a "degree," which is the same degree used to
+% characterize polynomials. Parametrically, NURBS are ratios of polynomials
+% and thus, the degree must be specified. The polynomials that form the
+% NURBS are the so-called Basis Splines.
+
+% NURBS are an industry standard for conveying the description of shapes
+% because they are a highly general case of almost all shapes used in
+% engineering. NURBS can exactly reproduce conic sections (circles,
+% ellipses, parabolas, and hyperbolas), as well as Bezier curve. The
+% advantage of NURBS is that with a single formula, all other shapes can be
+% reproduced (as oppossed to having custom formulae for each individual
+% shape).
+%% Formulae
+% NURBS defintion
+%%
+% $C(u) = \frac{\sum_{i=0}^{n}{w_{i}P_{i}N_{i,p}(u)}}{\sum_{i=0}^{n}{w_{j}N_{i,p}(u)}}$
+%%
+% Curvature (of any parametric curve).
+%%
+% N-th derivative of a rational function.
+%% Class definition
 classdef nurbs < handle
     %CUSTOMIZATION variables
     properties (SetAccess = public)
         name %Name of the nurbs' graphics as they appear on axes legend.
         color %Color of nurbs' graphics as will be rendered in an axes object.
-        
         canvas %Axes object on which to draw.
         sketches %Structured array containing handles to the graphical objects.
+        refresh
+        updated
+        %generated
+        
     end%properties(public)
     %DEFINING DATA variables
     properties (SetAccess = private)
@@ -17,11 +55,11 @@ classdef nurbs < handle
         k1_val %Lower limit of the knot span.
         k2_val %Upper limit of the knot span.
         knots %Number of knots in the sequence.
-        intervals
-        granules
+        intervals %Number of distinct knot intervals.
+        granules %Number of discrete points to evaluate between intervals.
         closed % Whether the first CP is identical to the last CP.
         w %Defining weight vector.
-        weights %Number of weights.
+        weights %Number of weights. %DEPRECATE, THIS IS REDUNDANT WITH "points".
         CP %Defining control points.
         points %Number of points (length of CP and w).
         dim %Dimension of control points.
@@ -73,11 +111,32 @@ classdef nurbs < handle
                 'Tangents',[],...
                 'Normals',[],...
                 'CP_Labels',[]);
+            %{
+            this.generated = struct(...
+                'Curve',false,...
+                'Polygon',false,...
+                'Tangents',false,...
+                'Normals',false,...
+                'CP_Labels',false);
+            %}
+            this.updated = struct(...
+                'Curve',false,...
+                'Polygon',false,...
+                'Tangents',false,...
+                'Normals',false,...
+                'CP_Labels',false);
+            this.refresh = struct(...
+                'Curve',true,...
+                'Polygon',false,...
+                'Tangents',false,...
+                'Normals',false,...
+                'CP_Labels',false);
+            
             if nargin == 0
                 this.XYZ_plot = [];
                 this.CP_scatter = [];
                 this.vel_quiver = [];
-                this.g = [];
+                this.g = 1;
                 this.o = [];
                 this.d = [];
                 this.XYZ = [];
@@ -87,8 +146,8 @@ classdef nurbs < handle
                 this.w = [];
                 this.k1_val = [];
                 this.k2_val = [];
-                this.R_buffer = [];
-                this.S_buffer = [];
+                this.R_buffer = []; %WILL DEPRECATE IN THE FUTURE ONCE...
+                this.S_buffer = []; %polynomial.m AND spline.m MATURE.
                 return;
             end%if
             if mod(nargin,2) ~= 0
@@ -135,24 +194,156 @@ classdef nurbs < handle
         %Custom creation routines.
         function nrb = CreateFromPolygon(poly,p,g)
             if ~(exist('polygon','file') == 2)
-                
+                error('This operation needs the file polygon.m')
             end%if
-            nrb = nurbs(...
-                'CP',[poly.XY;poly.XY(end,:)],...
+            if poly.open
+                nrb = nurbs(...
+                'CP',poly.XY,...
                 'p',p,...
                 'g',g);
+            else %polygon is closed
+                nrb = nurbs(...
+                'CP',[poly.XY;poly.XY(1,:)],...
+                'p',p,...
+                'g',g);
+            end%if
+            nrb.SetColor(poly.color);
+            nrb.generate(2);
         end%function.
-        
-        %Create a NURBS from CP obtained by offseting another NURBS. Child
-        %NURBS inherits the same knot vector, order, but not the weights.
-        function nrb = CreateFromNURBSOffset(progenitor)
-            nrb = nurbs;
-            
+        function nrb = CreateFromNURBSOffset(progenitor,offset)
+            %This routine takes as input an already existing NURBS. It will
+            %then offset said NURBS by a user-specified amount and define
+            %the offset points as the control points for *this* nurbs.
+            %Granularity and degree are copied.
+            nrb = nurbs(...
+                'CP',progenitor.Offset(offset),...
+                'p',progenitor.p,...
+                'g',progenitor.g);
+            nrb.generate(2);
         end%function
+        
     end%methods (Creation)
     %High-level instance MODIFICATION and QUERY routines.
     methods
-       
+        %Memory Allocation and reallocation.s
+        function Calloc_P(this,points)
+            this.CP = zeros(points,this.dim);
+            this.w = zeros(points,this.dim);
+            this.kn = zeros(points+this.o,this.dim); %MAKE SURE THIS IS CORRECT!!!
+        end%function
+        function ReCalloc_P(this,new_points)
+            
+        end%function
+        function Calloc_G(this,g)            
+            %Sizes the data buffers according to the granularity to the
+            %number of points, knots, and granules.
+            this.granules = this.intervals*(g + 1) + 1;
+            
+            %this.xyz = zeros(this.granules,this.dim);
+            this.txy = zeros(this.granules,this.dim);
+            this.nxy = zeros(this.granules,this.dim);
+
+        end%function
+        function ReCalloc_G(this,new_g)
+            %Resizes the data buffers according to the granularity parameter.
+            new_granules = this.intervals*(new_g + 1) + 1;
+            if new_granules == this.granules
+                return;
+            elseif new_granules > this.granules
+            elseif new_granules < this.granules
+            end%if
+        end%function
+        
+        %Definition subroutines.
+        function SetKnots(this,knots,kn)
+            %WIP
+        end%function
+        function SetWeights(this,weights,w)
+            %WIP
+            
+            for ii = 1:weights
+                this.w = w(ii);
+            end%ii
+            
+        end%function
+        
+        function EditWeights(this,weights,idx,w_vals)
+            %Replace the Old weights with the new ones.
+            for ii = 1:weights
+                if idx(ii) > this.points || idx(ii) < 0
+                    warning([...
+                        'Invalid index detected, skipping... (input was )',...
+                        num2str(idx(ii)),...
+                        'NURBS has only',...
+                        num2str(this.points),'weights.'])
+                    continue;
+                end%if
+                this.w(idx(ii)) = w_vals(ii);
+            end%ii
+            %The curve has been changed, all graphics are outdated...
+            this.updated.Curve = false;
+            this.updated.Polygon = false;
+            this.updated.Tangents = false;
+            this.updated.Normals = false;
+            this.updated.CP_Labels = false;
+            
+            %Set a refresh routine here.            
+            
+        end%function
+        function EditKnots(this,knots,idx,kn_vals)
+            for ii = 1:knots
+                if idx(ii) > this.knots || idx(ii) < 0
+                    warning([...
+                        'Invalid index detected, skipping... (input was )',...
+                        num2str(idx(ii)),...
+                        'NURBS has only',...
+                        num2str(this.points),'knots.'])
+                    continue;
+                end%if
+                this.kn(idx(ii)) = kn_vals(ii);
+            end%ii
+            %Run a check to make sure the newly edited sequence is ok.
+            if ~nurbs.NonDecreasing(this.knots,this.kn)
+                error('Knot sequence is no-longer non-decreasing after edit!');
+            end%if
+            
+            %The curve has been changed, all graphics are outdated...
+            this.updated.Curve = false;
+            this.updated.Polygon = false;
+            this.updated.Tangents = false;
+            this.updated.Normals = false;
+            this.updated.CP_Labels = false;
+            
+        end%function
+        function EditControlPoints(this,points,idx,vals)
+            for ii = 1:points
+                if idx(ii) > this.points || idx(ii) < 0
+                    warning([...
+                        'Invalid index detected, skipping... (input was )',...
+                        num2str(idx(ii)),...
+                        'NURBS has only',...
+                        num2str(this.points),'CP.'])
+                    continue;
+                end%if
+                for jj = 1:this.dim
+                    this.CP(idx(ii),jj) = vals(ii,jj);
+                end%jj
+            end%ii
+            
+            %The curve has been changed, all graphics are outdated...
+            this.updated.Curve = false;
+            this.updated.Polygon = false;
+            this.updated.Tangents = false;
+            this.updated.Normals = false;
+            this.updated.CP_Labels = false;
+            
+            %Set a refresh routine here.            
+            
+        end%function
+        function EditGranules(this,new_granules)
+            
+        end%function
+        
         %Input validation prior to NURBS generation
         function validate(this)
             %Check the control points.
@@ -663,7 +854,7 @@ classdef nurbs < handle
         end%function
         
         %Create an orthogonal offset.
-        function [XY] = offset(this,distance)
+        function [XY] = Offset(this,distance)
             if this.generated == false
                 error('NURBS is not generated. Cannot thicken.');
             end%if
@@ -694,6 +885,9 @@ classdef nurbs < handle
             end%
         end%function
         
+        function SaveAsIGES(this)
+            
+        end%function
         
         % Generate control points by extruding NURBS orthogonally along the
         % curve.
@@ -1150,6 +1344,9 @@ classdef nurbs < handle
                 'Color',this.color,...
                 'Visible','off');
             
+            this.graphics_initialized  = true;
+        end%function.
+        function GenerateCPLabels(this)
             %This will render labels for the control vertices.
             %Create the labels for Vertices
             this.sketches.CP_Labels = text(...
@@ -1165,9 +1362,7 @@ classdef nurbs < handle
                     ['w = ',num2str(this.w(ii))]...
                     };
             end%ii
-            
-            this.graphics_initialized  = true;
-        end%function.
+        end%function
         
         %Visibility toggling functions
         function Toggle(this,varargin)
@@ -1259,10 +1454,9 @@ classdef nurbs < handle
         end%function
         
     end%methods (Graphical demonstrations)
-    
     methods (Static)
-        %Compute a unit normal.
         function [nx,ny] = UnitNormal2D(dx,dy)
+            %Compute a unit normal.
             mag = sqrt(dx*dx + dy*dy); %Magnitude of the input direction.
             A = dx/mag; %Normalized X-component of the direction.
             B = dy/mag; %Normalized Y-component of the direction.
@@ -1271,6 +1465,12 @@ classdef nurbs < handle
             ny = A/detA;
         end%function
         
+        function status = NonDecreasing(entries,sequence)
+            %Check that a sequence is non-decreasing.
+            status = true; %"Innocent until proven guilty."
+            for ii = 1:(entries - 1)
+                status = status*(sequence(ii) <= sequence(ii + 1));
+            end%ii
+        end%function
     end%methods (Static)
-    
 end
