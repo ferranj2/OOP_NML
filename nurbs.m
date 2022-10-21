@@ -1454,6 +1454,10 @@ classdef nurbs < handle
         end%function
         
     end%methods (Graphical demonstrations)
+    %Low-level SPECIALIZED routines SPECIFIC TO THE CLASS.
+    methods (Static)
+    end%methods (Static)
+    %Low-level ELEMENTARY routines
     methods (Static)
         function [nx,ny] = UnitNormal2D(dx,dy)
             %Compute a unit normal.
@@ -1464,7 +1468,6 @@ classdef nurbs < handle
             nx = -B/detA;
             ny = A/detA;
         end%function
-        
         function status = NonDecreasing(entries,sequence)
             %Check that a sequence is non-decreasing.
             status = true; %"Innocent until proven guilty."
