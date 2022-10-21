@@ -1681,7 +1681,7 @@ classdef ellipse < handle
         end%function
         
     end%methods (Demonstrations)
-    %Low-level functions with no error checking specific to this class.
+    %Low-level SPECIALIZED routines SPECIFIC TO THE CLASS.
     methods (Static)
         
         %Operations involving the quadric coefficients..
@@ -1859,9 +1859,7 @@ classdef ellipse < handle
         end%function
         
     end%methods
-    
-    %Elementary low-level functions that are not unique in application to
-    %the class.
+    %Low-level ELEMENTARY routines
     methods (Static)
         %Basic Geometry features.
         function [x,y,t1,t2] = Intersect2p2p(x1,y1,x2,y2,x3,y3,x4,y4)
@@ -1898,5 +1896,4 @@ classdef ellipse < handle
             sign = (x > 0) - (x < 0);
         end%function       
     end%methods (Static)
-    
 end%classdef
