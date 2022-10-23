@@ -13,6 +13,20 @@ axis(ax,'equal');
 %load('fiber_copy.mat');
 load('LVL10.mat');
 fibers = length(fiber_copy);
+
+%TIM #1
+%{
+load('tc2d2owritten.mat')
+fibers = length(fiberpaths);
+fiber_copy = fiberpaths;
+%}
+
+%TIM #2
+%{
+load('alltogetherfull.mat')
+fibers = length(fiber);
+fiber_copy = fiber;
+%}
 path_nurbs = cell(fibers,1); %This will store NURBS paths.
 upper_nurbs = cell(fibers,1); %These are offset from the path NURBS.
 lower_nurbs = cell(fibers,1); %These are offset from the
@@ -39,10 +53,34 @@ for ii = 1:holes
     HOLES{ii}.sketches.Curve.LineWidth = 1;
     HOLES{ii}.Show;
 end%ii
+%{
+B1 = polygon.CreateFromList(length(fiber_copy{1}),fiber_copy{1},true);
+B2 = polygon.CreateFromList(length(fiber_copy{2}),fiber_copy{2},true);
+B3 = polygon.CreateFromList(length(fiber_copy{3}),fiber_copy{3},true);
+
+B1.SetCanvas(ax);
+B2.SetCanvas(ax);
+B3.SetCanvas(ax);
+
+B1.SetColor([1,1,0]);
+B2.SetColor([1,1,0]);
+B3.SetColor([1,1,0]);
+
+B1.Show;
+B2.Show;
+B3.Show;
+
+B1.Toggle('Normals');
+B2.Toggle('Normals');
+B3.Toggle('Normals');
+%}
+%line('Parent',ax,'XData',fiber_copy{1}(:,1),'YData',fiber_copy{1}(:,2),'Color',[1,1,1])
+%line('Parent',ax,'XData',fiber_copy{2}(:,1),'YData',fiber_copy{2}(:,2),'Color',[1,1,1])
+%line('Parent',ax,'XData',fiber_copy{3}(:,1),'YData',fiber_copy{3}(:,2),'Color',[1,1,1])
 
 %Define an "Extruder" polygon.
 source_poly = polygon.CreateRegularByLength(0,0,3,1);
-source_poly.SetRefreshRate(4);
+source_poly.SetRefreshRate(10);
 source_poly.SetCanvas(ax);
 source_poly.Show;
 source_poly.ToggleAABB;
@@ -51,7 +89,7 @@ source_poly.SetColor([0,1,1]);
 
 %Define an "Offset Polygon.
 target_poly = polygon.CreateRegularByLength(0,0,3,1);
-target_poly.SetRefreshRate(4);
+target_poly.SetRefreshRate(10);
 target_poly.SetCanvas(ax);
 target_poly.Show;
 target_poly.ToggleAABB;
@@ -66,7 +104,6 @@ path_poly.SetName('Path');
 path_poly.SetColor([1,1,1]);
 
 %Cell arrays to store various nurbs.
-
 
 offset = 0.1;
 max_passes = 2; %Number of Laplacian smooths 
@@ -102,7 +139,7 @@ bad = [25,26:37,39:44,46:51,54:56,60:63];
 %25[mm]
 %Add xy labels with units.
 %[select,select2,select3,select4]
-for ii = 34:fibers
+for ii = all
     %for ii = select1(2:end)
     sides = length(fiber_copy{ii});
     if sides < 6
@@ -119,7 +156,7 @@ for ii = 34:fibers
     else
         mult = 1;
     end
-    
+    %mult = -1;
     
     
     
@@ -131,7 +168,7 @@ for ii = 34:fibers
     %source_poly.aabb.FrameCanvas;
 
     source_poly.DetectSharpTurns(Rf);
-    %stamp = Imprint(source_poly);
+    stamp = Imprint(source_poly);
 
     %The "target" polygon data structure is redefined as the offset of the
     %"source" polygon data structure. 
@@ -147,9 +184,13 @@ for ii = 34:fibers
 
     %The "path" polygon will define the centerline nurbs.
     path_poly.RedefineAsWeightedAverage(source_poly,1,target_poly,1);
+    stamp3 = Imprint(path_poly);
+    stamp3.LineStyle = '--';
     if path_poly.perimeter < 2.5
         continue;
     end%if
+    
+
     
     %Fit NURBS through the path polygon.
     path_nurbs{ii} = nurbs.CreateFromPolygon(path_poly,p,g);

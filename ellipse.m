@@ -230,6 +230,7 @@ classdef ellipse < handle
             elli.a = a*sign_a;
             elli.b = b*sign_b;
             
+            elli.MeasureAll;
         end%function
         function elli = CreateFromFocciAndMajor(Fx1,Fy1,Fx2,Fy2,a)
             %The orientation of the Major Radius is from focus 1 to focus 2.
@@ -352,23 +353,23 @@ classdef ellipse < handle
             %}
         end%function
         
-        function elli = CreateLEEF(x1,y1,x2,y2,x3,y3,x4,y4)
+        function elli = CreateLEE2p2d(x1,y1,dx1,dy1,x2,y2,dx2,dy2)
             %Fit an ellipse that goes through two points "x1,y1" and
-            %"x2,y2" such that it is also tangent to directions
+            %"x3,y3" such that it is also tangent to directions
             %"x2-x1,y2-y1" and "x4-x3,y4-y3."
             elli = ellipse;
             %Determine where the two lines intersect.
-            [Ox,Oy,~,~] = ellipse.Intersect2p2p(...
+            [Ox,Oy,~,~] = ellipse.Intersect2p2d(...
                 x1,y1,...
+                dx1,dy1,...
                 x2,y2,...
-                x3,y3,...
-                x4,y4);          
+                dx2,dy2);
                   
             %Compute vectors from the intersection back to the points.
             OAx = x1 - Ox;
             OAy = y1 - Oy;
-            OBx = x3 - Ox;
-            OBy = y3 - Oy;
+            OBx = x2 - Ox;
+            OBy = y2 - Oy;
             
             %Find reciprocal basis to p1 and p2.
             q1x = +OBy/(OAx*OBy - OAy*OBx);
@@ -390,8 +391,6 @@ classdef ellipse < handle
             (q1y^2 + 2*a*q1y*q2y + q2y^2)*y^2 - 2*q1y*y - 2*q2y*y + 1
             %}
             
-            
-            
             %Quadric coefficients.
             A = (q1x^2 + 2*alpha*q1x*q2x + q2x^2);
             B = 2*(q1x*q1y + alpha*(q1x*q2y + q2x*q1y) + q2x*q2y);
@@ -399,51 +398,15 @@ classdef ellipse < handle
             D = -2*(q1x + q2x);
             E = -2*(q1y + q2y);            
             F = 1;
-        
             [elli.xc,elli.yc,elli.a,elli.b,elli.eax,elli.eay,elli.ebx,elli.eby] = ellipse.Quadrics2Metrics(A,B,C,D,E,F);
-
+            %For some reason, the above quadric coefficients return the
+            %correct shape for the ellipse but do not center it correctly.
+            %To correct it, the following formulae are used:
             elli.xc = Ox + (OAx + OBx)/(1 + alpha);
             elli.yc = Oy + (OAy + OBy)/(1 + alpha);            
             elli.MeasureAll;
-            %elli.genfrom2dir1c(elli.a*elli.fa,elli.b*elli.fb,[elli.xc;elli.yc]);
         end%function
-        
-        function elli = CreateLEEF2(x1,y1,x2,y2,x3,y3,x4,y4)
-            %Fit an ellipse that goes through two points "x1,y1" and
-            %"x2,y2" such that it is also tangent to directions
-            %"x2-x1,y2-y1" and "x4-x3,y4-y3."
-            elli = ellipse;
-            %Determine where the two lines intersect.
-            [Ox,Oy,~,~] = ellipse.Intersect2p2p(...
-                x1,y1,...
-                x2,y2,...
-                x3,y3,...
-                x4,y4);          
-                  
-            %Compute vectors from the intersection back to the points.
-            OAx = x1 - Ox;
-            OAy = y1 - Oy;
-            OBx = x3 - Ox;
-            OBy = y3 - Oy;
 
-            %Alpha for minimal eccentricity.
-            alpha = 2*(OAx*OBx + OAy*OBy)/(OAx*OAx + OAy*OAy + OBx*OBx + OBy*OBy);
-            elli.xc = Ox + (OAx + OBx)/(1 + alpha);
-            elli.yc = Oy + (OAy + OBy)/(1 + alpha);
-            %fprintf('%f\n',elli.xc)
-            %fprintf('%f\n',elli.yc)
-
-            [elli.a,elli.eax,elli.eay,elli.b,elli.ebx,elli.eby,elli.Vx1,elli.Vy1,elli.Vx2,elli.Vy2] = ellipse.RadiiFromDirections(...
-                elli.xc,...
-                elli.yc,...
-                x1 - elli.xc, y1 - elli.yc,...
-                x3 - elli.xc, y3 - elli.yc);
-            %x1 - elli.xc, y1 - elli.yc,...
-            %x3 - elli.xc, y3 - elli.yc);
-            elli.MeasureAll;
-            %elli.genfrom2dir1c(elli.a*elli.fa,elli.b*elli.fb,[elli.xc;elli.yc]);
-        end%function
-        
     end%methods (Static)
     %High-level instance MODIFICATION and QUERY routines.
     methods 
@@ -516,6 +479,7 @@ classdef ellipse < handle
         end%function
         function MeasureBasic(this)
             this.area = pi*this.a*this.b; 
+            this.c = sqrt(this.a*this.a - this.b*this.b); %"linear" eccentricity
             this.e = this.c/this.a; %eccentricity
             this.l = this.a*(1 - this.e*this.e); %Semi latus rectum
         end%function
@@ -537,7 +501,6 @@ classdef ellipse < handle
             this.Vy4 = this.yc - this.b*this.eby;
         end%function
         function MeasureFocci(this)
-            this.c = sqrt(this.a*this.a - this.b*this.b); %"linear" eccentricity
             this.Fx1 = this.xc + this.c*this.eax;
             this.Fy1 = this.yc + this.c*this.eay;
             this.Fx2 = this.xc - this.c*this.eax;
@@ -592,20 +555,39 @@ classdef ellipse < handle
         
         %Orientation
         function ReverseMinorRadius(this)
-            this.ebx = -this.ebx;
-            this.eby = -this.eby;
+            this.ebx = this.ebx*(-1);
+            this.eby = this.eby*(-1);
 
             RefreshMinorRadius(this);
         end%function
         function ReverseMajorRadius(this)
-            this.eax = -this.eax;
-            this.eay = -this.eay;
+            this.eax = this.eax*(-1);
+            this.eay = this.eay*(-1);
             
             RefreshMajorRadius(this);
         end%function
         
         %Query routines
-        function XY = CreatePolarSector(this,th1,th2,N)
+        function XY = CreatePolarSector2P(this,x1,y1,x2,y2,N)
+            if nargin < 6
+                N = 30;
+            end%if
+            if N <= 1
+                error('Must input a positive integer greater than 1.');
+            end%if
+            XY = zeros(N,2); %Allocate output memory.
+            XY = ellipse.PolarSector2P(XY,N,...
+                x1,y1,... %First point.
+                x2,y2,... %Second point.
+                this.xc,this.yc,... %Ellipse's center.
+                this.e,... %Ellipse's eccentricity.
+                this.eax,...
+                this.eay,...
+                this.b,...
+                this.ebx,...
+                this.eby);
+        end%function
+        function XY = CreatePolarSector2A(this,th1,th2,N)
             %Creates an elliptical sector using the center-based polar
             %form. The sector is subtended between a minimum angle "th1",
             %and maximum angle "th2", both measured from the oriented major
@@ -675,7 +657,7 @@ classdef ellipse < handle
         %DEPRECATE
 
 
-        
+        %DEPRECATE
         %Generate from 2 directions and a center.
         function genfrom2dir1c(this,f1,f2,C)
             dim1 = mustbeflat(f1);
@@ -752,6 +734,7 @@ classdef ellipse < handle
             %Flag that the ellipse has been successfully created.
             this.generated = true;
         end
+        %DEPRECATE
         
         %Generate from 2 directions and two points.
         function genfrom2dir2p(this,A,dA,B,dB)
@@ -1654,32 +1637,91 @@ classdef ellipse < handle
     %Graphical demonstrations
     methods (Static)
         
-        function [ax,elli] = TestLEEFillet
+        function [ax,elli] = TestLEE2p2d
+            %Constructs an ellipse from 2 points and two directions. The
+            %ellipse should coincice with both points tangent to the
+            %specified directions an
+            
             ellipse.CleanSlate;
-            %[ax,elli] = ellipse.TestLEEFillet
             ax = custom_axis;
             axis(ax,'equal');
+            
+            %Point 1 and its prescribed tangent.
             x1 = 1;
             y1 = 1;
+            dx1 = 1;
+            dy1 = -3;
             
-            x2 = -5;
-            y2 = -2;
+            %Point 2 and its prescribed tangent.
+            x2 = 1;
+            y2 = -1;
+            dx2 = 2;
+            dy2 = 4;
+
+            quiver(ax,...
+                [x1,x2],...
+                [y1,y2],...
+                [dx1,dx2],...
+                [dy1,dy2],...
+                'Color',[0,0,1],...
+                'Marker','s',...
+                'MarkerFaceColor',[0,0,1],...
+                'MarkerEdgeColor',[0,0,0]);
             
-            x3 = 1;
-            y3 = -1;
-            
-            x4 = 3;
-            y4 = 3;
-            scatter(ax,[x1,x3],[y1,y3],'Marker','s')
-            quiver(ax,[x1,x3],[y1,y3],[(x2-x1),(x4-x3)],[(y2-y1),(y4-y3)]);
-            
-            elli = ellipse.CreateLEEF(x1,y1,x2,y2,x3,y3,x4,y4);
-            %elli = ellipse.CreateLEEF2(x1,y1,x2,y2,x3,y3,x4,y4);
+            elli = ellipse.CreateLEE2p2d(x1,y1,dx1,dy1,x2,y2,dx2,dy2);
             elli.SetCanvas(ax)
             elli.Toggle('Curve','MajorRadius','MinorRadius','Focci','Vertices')            
-            
         end%function
-        
+        function [ax,elli] = TestSector2P
+            ellipse.CleanSlate;
+            ax = custom_axis;
+            axis(ax,'equal');
+            
+            xc = 1;
+            yc = 2;
+            a = 4;
+            b = a/2;
+            th = pi/4;
+            elli = ellipse.CreateXYABTH(xc,yc,a,b,th);
+            elli.SetCanvas(ax);
+            elli.Toggle('Curve','Vertices','MajorRadius','MinorRadius','Center','Focci')
+            
+            arcs = 3;
+            x1 = [  4, 1, -2.5];
+            y1 = [  1, 3,    0];
+            x2 = [4.5,-1, -0.5];
+            y2 = [  4, 2,   -2];
+            color = {[1,1,0],[1,0,1],[0,1,1]};
+            for ii = 1:arcs
+                XY = elli.CreatePolarSector2P(...
+                    x1(ii),y1(ii),...
+                    x2(ii),y2(ii),...
+                    30);
+                line('Parent',ax,...
+                    'XData',[elli.xc,x1(ii)],...
+                    'YData',[elli.yc,y1(ii)],...
+                    'Marker','s',...
+                    'MarkerEdgeColor',[0,0,0],...
+                    'MarkerFaceColor',color{ii},...
+                    'LineStyle','--',...
+                    'Color',[0,0,0]);
+                line('Parent',ax,...
+                    'XData',[elli.xc,x2(ii)],...
+                    'YData',[elli.yc,y2(ii)],...
+                    'Marker','s',...
+                    'MarkerEdgeColor',[0,0,0],...
+                    'MarkerFaceColor',color{ii},...
+                    'LineStyle','--',...
+                    'Color',[0,0,0]);
+                B = line('Parent',ax,...
+                    'XData',XY(:,1),...
+                    'YData',XY(:,2),...
+                    'LineStyle','none',...
+                    'Marker','o',...
+                    'MarkerEdgeColor',[0,0,0],...
+                    'MarkerFaceColor',color{ii});
+            end%ii
+        end%function
     end%methods (Demonstrations)
     %Low-level SPECIALIZED routines SPECIFIC TO THE CLASS.
     methods (Static)
@@ -1727,13 +1769,8 @@ classdef ellipse < handle
             %f2x: X-component of some other vector...
             %f2y: Y-component of some other vector...
             
-            %Intermediate quantities.
-            mag1 = f1x*f1x + f1y*f1y; %Square magnitudes.
-            mag2 = f2x*f2x + f2y*f2y;
-            dotP = f1x*f2x + f1y*f2y; %Dot product
-            
             %Find a Vertex
-            t0 = 0.5*acot(0.5*(mag1 - mag2)/dotP);
+            t0 = 0.5*acot(0.5*(f1x*f1x + f1y*f1y - f2x*f2x - f2y*f2y)/(f1x*f2x + f1y*f2y));
             cos_t0 = cos(t0);
             sin_t0 = sin(t0);
             Vx1 = f0x + f1x*cos_t0 + f2x*sin_t0;
@@ -1774,32 +1811,26 @@ classdef ellipse < handle
             %subtended angles. This information is used to produce an
             %elliptical arc using a polar form. The details of that are
             %covered in "PolarSector2P"'s description.
-            %{
-            dx1 = xc - x1; 
-            dy1 = yc - y1;
-            dx2 = xc - x2;
-            dy2 = yc - y2;
-            mag_1 = sqrt(dx1*dx1 + dy1*dy1);
-            mag_2 = sqrt(dx2*dx2 + dy2*dy2);
-            cos_th1a = (dx1*eax + dy1*eay)/mag_1;
-            cos_th2a = (dx2*eax + dy2*eay)/mag_2;
+            th1 = ellipse.PolarAngleOfPoint(xc,yc,eax,eay,ebx,eby,x1,y1);
+            th2 = ellipse.PolarAngleOfPoint(xc,yc,eax,eay,ebx,eby,x2,y2);
             
-            if (ebx*dx1 + eby*dy1) <= 0
-                th1 = acos(-cos_th1a);
-            else 
-                th1 = -acos(-cos_th1a);
+            %If any of the angles are negative, add 2pi
+            th1 = th1 + 2*pi*(th1 < 0);
+            th2 = th2 + 2*pi*(th2 < 0);
+            
+            %Determine which angle is the bigger of the two.
+            if th2 < th1
+                [th1,th2] = ellipse.swap(th1,th2);
             end%if
             
-            if (ebx*dx2 + eby*dy2) <= 0
-                th2 = acos(-cos_th2a);
-            else 
-                th2 = -acos(-cos_th2a);
-            end%if     
-            %}
-            th1 = PolarAngleOfPoint(xc,yc,eax,eay,ebx,eby,x1,y1);
-            th2 = PolarAngleOfPoint(xc,yc,eax,eay,ebx,eby,x2,y2);
-
-            XY = PolarSector2A(XY,N,th1,th2,xc,yc,e,eax,eay,b,ebx,eby);
+            %If the angles would produce the long arc, make them produce
+            %the short
+            if th2 - th1 > pi
+                th2 = th2 - 2*pi;
+            end%if
+            
+            
+            XY = ellipse.PolarSector2A(XY,N,th1,th2,xc,yc,e,eax,eay,b,ebx,eby);
         end%function
         function XY = PolarSector2A(XY,N,th1,th2,xc,yc,e,eax,eay,b,ebx,eby)
             %Given the ellipse's defining data and two angles measured from
@@ -1807,16 +1838,15 @@ classdef ellipse < handle
             %elliptical sector/arc. The user specifies how many points to
             %generate via the parameter "N". The storage buffer must be
             %provided and must be large enough to store the "N" 2D points.
-            d_theta = (th2 - th1)/(N-1);
-            theta = 0;
-            crossAB = eax*eby + eay*ebx;
+            th = th1; %"Theta"
+            d_th = (th2 - th1)/(N-1); %"Delta theta".
             for ii = 1:N
-                cos_thA = cos(theta);
-                cos_thB = cos(pi/2 - theta); %Should I replace this with sine?
+                cos_thA = cos(th);
+                cos_thB = cos(pi/2 - th); %Should I replace this with sine?
                 R = ellipse.PolarRadius(b,e,cos_thA);
-                XY(ii,1) = xc + R*(+eby*cos_thA - eay*cos_thB)/crossAB;
-                XY(ii,2) = yc + R*(-ebx*cos_thA + eax*cos_thB)/crossAB;
-                theta = theta + d_theta; %March the Angle
+                XY(ii,1) = xc + R*(+eby*cos_thA - eay*cos_thB);
+                XY(ii,2) = yc + R*(-ebx*cos_thA + eax*cos_thB);
+                th = th + d_th; %March the Angle
             end%ii
         end%function
         
@@ -1831,7 +1861,7 @@ classdef ellipse < handle
             dx = xc - x1; 
             dy = yc - y1;
             mag = sqrt(dx*dx + dy*dy);
-            cos_tha = (dx1*eax + dy1*eay)/mag;
+            cos_tha = (dx*eax + dy*eay)/mag;
             if (ebx*dx + eby*dy) <= 0
                 th = acos(-cos_tha);
             else

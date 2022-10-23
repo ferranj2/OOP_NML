@@ -1076,7 +1076,8 @@ classdef polygon < handle
             while X_perm(needle) ~= 1
                 needle = needle + 1;
                 if needle == length(X_perm)
-                    needle = 1;
+                    %needle = 1;
+                    break;
                 end%if
             end%while
             old_needle = needle;
@@ -1133,11 +1134,13 @@ classdef polygon < handle
                     yc2 = 0.5*(this.XY(iip1,2) + this.XY(iip2,2)) + 0.95*Rf*this.nxy(iip1,2);
                     
                     %Compute Arc length traversed. (ANIMATION + FUNCTIONALITY)
+                    %{
                     dsx = this.XY(iip1,1) - this.XY(ii,1);
                     dsy = this.XY(iip1,2) - this.XY(ii,2);
                     ds = sqrt(dsx*dsx + dsy*dsy);
                     F.RotateByArc(ds);
-
+                    %}
+                    
                     %Compute distance moved by the center (ANIMATION + FUNCTIONALITY)
                     dxc = xc2 - F.xc;
                     dyc = yc2 - F.yc;
@@ -1204,7 +1207,7 @@ classdef polygon < handle
                     end%while
                     needle = old_needle;
                     %input('Next?')
-                    pause(0.0001);
+                    %pause(0.0001);
                 end%ii
             end%kk
 
@@ -1276,21 +1279,37 @@ classdef polygon < handle
                         
                         idx_m = round(0.5*(idx(kk) + (idx(kk+1)-1))); %index of some middle point.
                         
+                        idx1 = idx(kk)-1;
+                        idx2 = idx(kk);
+                        idx3 = idx(kk + 1);
+                        idx4 = idx(kk + 1)+1;
+                        
+                        if idx4 > this.sides
+                            break;
+                        end%if
+                        
                         [this.XY,status,elli] = polygon.EllipticalFilletBlend(...
                             this.sides,...
                             this.XY,...
                             N,(idx(kk):(idx(kk+1)-1)),...
                             1,...
-                            this.XY(idx(kk)-1,1)    ,this.XY(idx(kk)-1,2),...   %x1,y1
-                            this.XY(idx(kk),1)      ,this.XY(idx(kk),2),...     %x2,y2
-                            this.XY(idx(kk + 1),1)  ,this.XY(idx(kk + 1),2),... %x3,y3
-                            this.XY(idx(kk + 1)+1,1),this.XY(idx(kk + 1)+1,2),... %x4,y4
+                            this.XY(idx1,1),this.XY(idx1,2),... %x1,y1
+                            this.XY(idx2,1),this.XY(idx2,2),... %x2,y2
+                            this.XY(idx3,1),this.XY(idx3,2),... %x3,y3
+                            this.XY(idx4,1),this.XY(idx4,2),... %x4,y4
                             idx_m); 
+                        elli.SetCanvas(this.canvas);
+                        elli.SetColor(this.color);
+                        elli.Toggle('Curve','MajorRadius','MinorRadius');
+                        elli.sketches.Curve.LineStyle = '--';
+                        
+                        %{
                         elli.Draw(this.canvas,100);
                         elli.DrawMajorRadius(this.canvas);
                         elli.DrawMinorRadius(this.canvas)
                         elli.sketch.Color = this.color;
                         elli.sketch.LineStyle = '--';
+                        %}
                     else
                         circ.SetCanvas(this.canvas);
                         circ.SetColor([1,1,1]);
@@ -1322,13 +1341,21 @@ classdef polygon < handle
                             this.XY(idx(1),1),this.XY(idx(1),2),... %x3,y3
                             this.XY(idx(1)+1,1)  ,this.XY(idx(1)+1,2),...
                             idx_m); %x4,y4
-                
+                        
+                        
+                        elli.SetCanvas(this.canvas);
+                        elli.SetColor(this.color);
+                        elli.Toggle('Curve','MajorRadius');
+                        elli.sketches.Curve.LineStyle = '--';
+                        
+                        
+                        %{
                         elli.Draw(this.canvas,100);
                         elli.DrawMajorRadius(this.canvas);
                         elli.DrawMinorRadius(this.canvas)
                         elli.sketch.Color = this.color;
                         elli.sketch.LineStyle = '--';
-                    
+                    %}
                 end%if
             end%if
             
@@ -2553,7 +2580,7 @@ classdef polygon < handle
         end%function
 
     end%methods (Demonstrations)
-    %Low-level functions with no error checking specific to this class.
+    %Low-level SPECIALIZED routines SPECIFIC TO THE CLASS.
     methods (Static)
         
         %Blending functions (take two segments and blend points in between)
@@ -2636,19 +2663,27 @@ classdef polygon < handle
         end%function
         function [XY,status,elli] = EllipticalFilletBlend(sides,XY,N,idx,K,x1,y1,x2,y2,x3,y3,x4,y4,idx_m)
             %idx_m index of a point towards center of the tight turn.
-            
+                        
+             elli = ellipse.CreateLEE2p2d(...
+                x1,y1,...
+                x2-x1,y2-y1,...
+                x3,y3,...
+                x4-x3,y4-y3);
+            %{
             elli = ellipse.CreateLeastEccentricFillet(...
                 x1,y1,...
                 x2-x1,y2-y1,...
                 x3,y3,...
                 x4-x3,y4-y3);
+            %}
             status = true;
             
             %idx_m = round(0.5*(idx(1) + idx(N))); %index of some middle point.
             dxc = elli.xc - XY(idx_m,1);
             dyc = elli.yc - XY(idx_m,2);
             if dxc*elli.eax + dyc*elli.eay > 0
-                elli.flip_a;
+                %elli.ReverseMajorRadius;
+                %elli.flip_a;
             end%if
 
             %OLD
@@ -2660,13 +2695,19 @@ classdef polygon < handle
             
             start = idx(1)-1;
             finish = idx(N)+1;
-            A = [XY(start,1),XY(start,2)];
-            E = [XY(finish,1),XY(finish,2)];
-            temp = elli.sector2P(A,E,N+2);
+            %A = [XY(start,1),XY(start,2)];
+            %E = [XY(finish,1),XY(finish,2)];
+            %temp = elli.sector2P(A,E,N+2);
+            temp = elli.CreatePolarSector2P(...
+                XY(start,1),XY(start,2),...
+                XY(finish,1),XY(finish,2),...
+                N+2);
+      
+            
             %XY([start,idx,finish],:) = elli.sector2P(A,E,N+2);
             XY(idx,:) = temp(2:end-1,:);
   
-            %See if the las two segments intersect.
+            %See if the last two segments intersect.
             [~,~,t1,t2] = polygon.Intersect2p2p(...
                 XY(idx(1)-1,1),XY(idx(1)-1,2),...
                 XY(idx(1),1)  ,XY(idx(1),2),...
@@ -2935,8 +2976,7 @@ classdef polygon < handle
         end%function
         
     end%methods (Static)
-    %Elementary low-level functions that are not unique in application to
-    %the class.
+    %Low-level ELEMENTARY routines
     methods (Static)
         %Basic Geometry features.
         function [nx,ny] = UnitNormal2D(dx,dy)
