@@ -2579,6 +2579,35 @@ classdef polygon < handle
             stamp.Color = [0,0,1];
         end%function
 
+        function [ax,poly] = TestPointInclusion
+            polygon.CleanSlate
+            
+            ax = custom_axis;
+            poly = polygon.CreateRegularByLength(...
+                0,...
+                0,...
+                4,...
+                2);
+            poly.SetCanvas(ax)
+            poly.Show;
+            
+            xp = 2*rand;
+            yp = 2*rand;
+            line(...
+                'Parent',ax,...
+                'XData',xp,...
+                'YData',yp,...
+                'Marker','o',...
+                'MarkerFaceColor',[0,0,1],...
+                'MarkerEdgeColor',[0,0,0]);
+            if polygon.ContainmentConvexPolygonvsPoint(poly.sides,poly.XY,xp,yp)
+                fprintf('Point inside polygon!\n');
+            else
+                fprintf('Point outside polygon!\n');
+            end%if
+            
+        end%function
+        
     end%methods (Demonstrations)
     %Low-level SPECIALIZED routines SPECIFIC TO THE CLASS.
     methods (Static)
@@ -2721,6 +2750,58 @@ classdef polygon < handle
             end%if
             
         end%function
+        
+        %Containment tests (Whether polygon encloses another object).
+        function contains = ContainmentConvexPolygonvsPoint(sides,XY,xp,yp)
+            %Assumes the polygon abstraction is used to represent a closed
+            %curve. It also assumes that the polygon is convex, for which
+            %an easier inclusion test than raycasting is available.
+            contains = true; %"Innocent until proven guilty."
+            for kk = 1:3
+                switch kk
+                    case 1
+                        start = 1;
+                        back = 1 - sides;
+                        next = 1;
+                        finish = 1;
+                    case 2
+                        start = 2;
+                        back = 1;
+                        next = 1;
+                        finish = sides - 1;
+                    case 3
+                        start = sides;
+                        back = 1;
+                        next = 1-sides;
+                        finish = 2;
+                end%switch
+                for ii = start:next:finish
+                    %This sucks, because MATLAB cannot reuse the pointer
+                    %for the edge that can be reused. Some edges are
+                    %computed twice unnecessarily.
+                    iim1 = ii - back;
+                    iip1 = ii + next;
+                    
+                    %Vector from corner of polygon to next corner.
+                    dxf = XY(iip1,1) - XY(ii,1);
+                    dyf = XY(iip1,2) - XY(ii,2);
+                    
+                    %Vector from corner of polygon to previous corner.
+                    dxb = XY(iim1,1) - XY(ii,1);
+                    dyb = XY(iim1,2) - XY(ii,2);
+                    
+                    %Vector from corner of polygon to point.
+                    dxp = xp - XY(ii,1);
+                    dyp = yp - XY(ii,2);
+
+                    if dxf*dxp + dyf*dyp < 0 || dxb*dxp + dyb*dyp < 0
+                        contains = false;
+                        break;
+                    end%if
+                end%ii
+            end%kk
+        end%function
+        
         
         %Standalone measuring functions.
         function A = Area(sides,XY)
