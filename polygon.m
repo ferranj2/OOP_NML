@@ -294,12 +294,14 @@ classdef polygon < handle
             poly.sides = progenitor.sides;
             poly.Calloc(poly.sides);
             poly.XY = progenitor.Offset(offset);
-            poly.Measure;
+            
+
             
             if poly.AABB_present
                 poly.aabb = AABB.CreateFromList(2,poly.sides,poly.XY);
             end%if
-            
+            poly.Measure;
+                        
             %Set flags.
             poly.regular = progenitor.regular;
             poly.open = progenitor.open;
@@ -508,7 +510,7 @@ classdef polygon < handle
             length = this.perimeter/this.sides;
         end%function
         
-        %Affine Transformations (modification)
+        %Affine Transformations (modification) MOVE to tensor.m
         function Displace(this,dx,dy)
             %[x'] = [x] + [dx]
             %[y'] = [y] + [dy]
@@ -1053,6 +1055,9 @@ classdef polygon < handle
             
         end%function
         function DetectSharpTurns(this,Rf)
+            
+            sink = 1;
+            
             %This routine applies a "rolling" circle type of operation to
             %flag turns that exceed the radius of the tighest turn that the
             %polygon should make.
@@ -1060,10 +1065,7 @@ classdef polygon < handle
             bad_points = ones(1,this.sides); %Allocate memory for an array of flags.
             
             %For this to work, the polygon must be oriented inwards.
-            if this.orientation
-                Rf = -Rf;
-                %this.ReverseNormals;
-            end%if
+
             %mult*
             
             
@@ -1095,7 +1097,7 @@ classdef polygon < handle
             F = circle.CreateXYR(...
                 0.5*(this.XY(1,1) + this.XY(2,1)) + Rf*this.nxy(1,1),... %X-center.
                 0.5*(this.XY(1,2) + this.XY(2,2)) + Rf*this.nxy(1,2),... %Y-center
-                abs(Rf));%Radiues
+                abs(Rf));%Radius
             F.SetCanvas(this.canvas);
             F.Show;
             F.sketches.Curve.Color = [1,1,0];
@@ -1130,11 +1132,11 @@ classdef polygon < handle
                 for ii = start:step1:finish
                     iip1 = ii + step1;
                     iip2 = ii + step2;
-                    xc2 = 0.5*(this.XY(iip1,1) + this.XY(iip2,1)) + 0.95*Rf*this.nxy(iip1,1);
-                    yc2 = 0.5*(this.XY(iip1,2) + this.XY(iip2,2)) + 0.95*Rf*this.nxy(iip1,2);
+                    xc2 = 0.5*(this.XY(iip1,1) + this.XY(iip2,1)) + sink*Rf*this.nxy(iip1,1);
+                    yc2 = 0.5*(this.XY(iip1,2) + this.XY(iip2,2)) + sink*Rf*this.nxy(iip1,2);
                     
                     %Compute Arc length traversed. (ANIMATION + FUNCTIONALITY)
-                    %{
+                    
                     dsx = this.XY(iip1,1) - this.XY(ii,1);
                     dsy = this.XY(iip1,2) - this.XY(ii,2);
                     ds = sqrt(dsx*dsx + dsy*dsy);
@@ -1179,35 +1181,35 @@ classdef polygon < handle
                     
                     %Needle found, now, check all the points in the negative sort
                     %direction that are within xc - R.
-                    needleL = needle; %Need a counter to subtract from the first needle.
-                    while X_sorted(needleL) > (F.xc - F.R) %&& X_sorted(1) > (F.xc - F.R)
-                        if F.ContainsPoint(this.XY(X_perm(needleL),1),this.XY(X_perm(needleL),2))
-                            flags.ZData(X_perm(needleL)) = 0;%"Un-NaN" the marker.
-                            bad_points(X_perm(needleL)) = -1;
+                    nL = needle; %Need a counter to subtract from the first needle.
+                    while X_sorted(nL) > (F.xc - F.R) %&& X_sorted(1) > (F.xc - F.R)
+                        if F.ContainsPoint(this.XY(X_perm(nL),1),this.XY(X_perm(nL),2))
+                            flags.ZData(X_perm(nL)) = 0;%"Un-NaN" the marker.
+                            bad_points(X_perm(nL)) = -1;
                         end%if
-                        needleL = needleL - 1;
-                        if needleL == 0 %If even the minimum X-value is to the left, break.
+                        nL = nL - 1;
+                        if nL == 0 %If even the minimum X-value is to the left, break.
                             %needleL = poly.sides;
                             break;
                         end%if
                     end%while
                     
                     %Cheack nearby "right" points.
-                    needleR = needle;
-                    while X_sorted(needleR) < (F.xc + F.R) %&& X_sorted(poly.sides) < (F.xc + F.R)
-                        if F.ContainsPoint(this.XY(X_perm(needleR),1),this.XY(X_perm(needleR),2))
-                            flags.ZData(X_perm(needleR)) = 0;%"Un-NaN" the marker.
-                            bad_points(X_perm(needleR)) = -1;
+                    nR = needle;
+                    while X_sorted(nR) < (F.xc + F.R) %&& X_sorted(poly.sides) < (F.xc + F.R)
+                        if F.ContainsPoint(this.XY(X_perm(nR),1),this.XY(X_perm(nR),2))
+                            flags.ZData(X_perm(nR)) = 0;%"Un-NaN" the marker.
+                            bad_points(X_perm(nR)) = -1;
                         end%if
-                        needleR = needleR + 1;
-                        if needleR == (this.sides + 1)
+                        nR = nR + 1;
+                        if nR == (this.sides + 1)
                             %needleR = 1;
                             break;
                         end%if
                     end%while
                     needle = old_needle;
-                    %input('Next?')
-                    %pause(0.0001);
+                    input('Next?');
+                    pause(0.0001);
                 end%ii
             end%kk
 
@@ -1260,6 +1262,19 @@ classdef polygon < handle
                     %Skip points with a "+1."
                     kk = kk + 1;
                 else %A point with "-1" is found.
+                    
+                    %{
+                    %DOT PRODUCT EXCLUDER:
+                    dx1 = this.XY(idx(kk),1) - this.XY(idx(kk)-1,1);
+                    dy1 = this.XY(idx(kk),2) - this.XY(idx(kk)-1,2);
+                    dx2 = this.XY(idx(kk+1)+1,1) - this.XY(idx(kk+1)-1,1);
+                    dy2 = this.XY(idx(kk+1)+1,2) - this.XY(idx(kk+1)-1,2);
+                    if dx1*dx2 + dy1*dy2 > 0
+                        kk = kk  + 2;
+                        continue;
+                    end%if
+                    %}
+                    
                     N = idx(kk + 1) - idx(kk);
                     %{
                     [this.XY,status,circ] = polygon.CircularFilletBlend(...
@@ -1543,6 +1558,7 @@ classdef polygon < handle
             end%if
             
         end%function
+        
         function FilterSelfIntersections(this)
             % THIS NEEDS A LOT MORE WORK!!!
             %This routine is called to help handle self-intersection
@@ -1847,8 +1863,13 @@ classdef polygon < handle
                 this.sketches.Vertex_Labels(ii).Color = this.color;
                 this.sketches.Vertex_Labels(ii).Visible = 'off';
                 this.sketches.Vertex_Labels(ii).Interpreter = 'latex';
-                this.sketches.Vertex_Labels(ii).String = {...
-                    ['V$_{',num2str(ii),'}$'],['(',num2str(this.XY(ii,1)),';',num2str(this.XY(ii,2)),')']};
+                %this.sketches.Vertex_Labels(ii).String = {...
+                %    ['V$_{',num2str(ii),'}$'],['(',num2str(this.XY(ii,1)),';',num2str(this.XY(ii,2)),')']};
+                %this.sketches.Vertex_Labels(ii).String = {...
+                %    ['V$_{',num2str(ii),'}$'];num2str(this.XY(ii,1));num2str(this.XY(ii,2))};
+                this.sketches.Vertex_Labels(ii).String =['V$_{',num2str(ii),'}$'];
+            
+            
             end%ii
             this.vertex_labels_on = true;            
         end%function
@@ -2165,7 +2186,7 @@ classdef polygon < handle
             ax = custom_axis;
             axis(ax,'equal');
             load('fiber_copy.mat');
-            fiber = 28;
+            fiber = 25;
             XY = fiber_copy{fiber};
 
             
@@ -2189,9 +2210,29 @@ classdef polygon < handle
             
             poly2 = polygon.CreateFromOffset(poly,0.09);
             poly2.SetCanvas(ax);
+            poly2.SetColor([1,0,0]);
             poly2.Show;
-   
             
+            poly3 = polygon.CreateFromOffset(poly,-0.09);
+            poly3.SetCanvas(ax);
+            poly2.SetColor([0,0,1]);
+            poly3.Show;
+
+            p1 = poly.sketches.Curve;
+            p2 = poly2.sketches.Curve;
+            p3 = poly3.sketches.Curve;
+            lgd = legend(ax,[p1,p2,p3],{'Progenitor','Inward Offset','Outward Offset'},'interpreter','latex','location','northeast');
+            title(lgd,'LEGEND','interpreter','latex');
+            
+            
+            drawnow
+            %poly2.
+    
+            %set(ax,'XLim',[12.2,14.2]);
+            %set(ax,'YLim',[1.8,3.6]);
+            %set(ax,'XLim',[2,5]);
+            %set(ax,'YLim',[1.5,5.5]);
+
         end%function        
         function [ax,polygons] = TestRegularPolygons
             %Create instances of regular polygons, name them, and show their
@@ -2213,6 +2254,7 @@ classdef polygon < handle
                     center{ii}(2),...
                     sides(ii),...
                     2);
+                polygons{ii}.open = true;
                 polygons{ii}.SetCanvas(ax)
                 polygons{ii}.SetName(names{ii});
                 polygons{ii}.SetColor(color{ii});
@@ -2322,16 +2364,17 @@ classdef polygon < handle
 
             load('fiber_copy.mat');
             
-            fiber_number = 37;
+            fiber_number = 28;
             fiber = fiber_copy{fiber_number};
             fiber(:,1) = fiber(:,1) - min(fiber(:,1));
             fiber(:,2) = fiber(:,2) - min(fiber(:,2));
             
             %Reverse orientation
-            %fiber(:,1) = flip(fiber(:,1));
-            %fiber(:,2) = flip(fiber(:,2));
+            fiber(:,1) = flip(fiber(:,1));
+            fiber(:,2) = flip(fiber(:,2));
 
-            
+            %ax.XLim = [-0.1,1]
+            %ax.YLim = [-0.2,0.6]
             poly = polygon.CreateFromList(length(fiber),fiber);
             %poly = polygon.CreateSimpleStar(0,0,10,3,4);
             
@@ -2339,6 +2382,14 @@ classdef polygon < handle
             
             poly.SetCanvas(ax);
             poly.Show;
+            poly.GenerateVertexLabels;
+            poly.Toggle('Vertex_Labels');
+            %ax.XLim = [-0.0712,0.4309];
+            %ax.YLim = [-0.0868,0.2853];
+            poly.sketches.Curve.Marker = 'o';
+            poly.sketches.Curve.MarkerFaceColor = [0,0,0];
+            poly.sketches.Curve.MarkerSize = 4;
+
             
             Atxt = text(...
                 ax,...
@@ -2469,23 +2520,45 @@ classdef polygon < handle
             %and then apply several passes of Laplacian Smoothing.
             polygon.CleanSlate;
             
-            lambda = 0.35; %Scaling factor.
-            stencil = 5; %Number of stencil points.
             
+            lambda = 0.1; %Scaling factor.
+            stencil = 7; %Number of stencil points.
+            %{
+            lambda = 0.35; %Scaling factor.
+            stencil = 3; %Number of stencil points.
+            
+            %}
             
             ax = custom_axis;
-            ax.Color = [0,0,0];
+            ax.Color = [1,1,1];
             axis(ax,'equal');
-            
+            ax.XTick = [];
+            ax.YTick = [];
+
             %Create a regular polygon of many sides and show it.
-            poly = polygon.CreateRegularByLength(0,0,80,2);
-            poly.SetCanvas(ax);
-            poly.SetColor([0,1,0]);
-            poly.Show;
-            poly.Toggle('Normals');
+            load('fiber_copy.mat');
+            fiber = 42;
+            XY = fiber_copy{fiber};
             
+            %{
+            load('noise.mat');
+            XY = noise;
+            %}
+            poly = polygon.CreateFromList(length(XY),XY);
+            
+            %poly = polygon.CreateRegularByLength(0,0,80,2);
+            poly.SetCanvas(ax);
+            poly.SetColor([0,0,1]);
+            poly.SetRefreshRate(20);
+            poly.Show;
+            poly.sketches.Curve.LineWidth = 2;
+            poly.Toggle('Normals');
+            %poly.Toggle('Centroid');
+            poly.ToggleAABB;
             set(ax,'XLim',[min(poly.XY(:,1)),max(poly.XY(:,1))]);
             set(ax,'YLim',[min(poly.XY(:,2)),max(poly.XY(:,2))]);
+            
+            
             %Add random noise to the regular polygon
             title(ax,'Proceed to distort the Polygon?');
             input('Add Noise?');
@@ -2493,22 +2566,40 @@ classdef polygon < handle
             smoothings = 100;
             
             spacer = '----------';
-            fprintf('%10s\t%10s\t%10s\t%10s \n','Area','Perimeter','Centroid-X','Centroid-Y');
-            fprintf('%10s\t%10s\t%10s\t%10s \n',spacer,spacer,spacer,spacer);
+            fprintf('%10s\t%10s\t%10s\t%10s\t%10s\t%10s \n','Area','Perimeter','Centroid-X','Centroid-Y','Var X', 'Var Y');
+            fprintf('%10s\t%10s\t%10s\t%10s\t%10s\t%10s \n',spacer,spacer,spacer,spacer,spacer,spacer);
 
+            %{
             for ii = 1:distortions
                 title(ax,['#Distortions = ',num2str(ii)]);
                 poly.AddNoise(0.75);
                 fprintf('%10f\t%10f\t%10f\t%10f \n',poly.area,poly.perimeter,poly.xc,poly.yc);
-                pause(0.05);
             end%ii
+            %}
+            
+            
             
             title(ax,'Proceed to smooth the Polygon?');
             input('Smooth-out the polygon?');
+            kk = 0;
+            stamp = Imprint(poly);
+
             for ii = 1:smoothings
+                kk = kk + 1;
+                summary = describe(poly.XY(2:end,:)- poly.XY(1:end-1,:));
+                
+                input('Next?');
                 title(ax,['#Smoothings = ',num2str(ii)]);
                 poly.Smooth(lambda,stencil);
-                fprintf('%10f\t%10f\t%10f\t%10f \n',poly.area,poly.perimeter,poly.xc,poly.yc);
+                if mod(kk,10) == 0
+                    stamp = Imprint(poly);
+                    text(ax,...
+                        (max(poly.XY(:,1))),...
+                        (max(poly.XY(:,2)) + min(poly.XY(:,2)))*0.5,...
+                        num2str(ii));
+                end
+                fprintf('%10f\t%10f\t%10f\t%10f\t%10f\t%10f \n',poly.area,poly.perimeter,poly.xc,poly.yc, summary.var(1),summary.var(2));
+                poly.Refresh
             end%ii
         end%function
         function [ax,poly] = TestDispersion
@@ -2607,6 +2698,29 @@ classdef polygon < handle
             end%if
             
         end%function
+        
+        function [ax,poly,poly2] = TestOffset
+            polygon.CleanSlate;
+            ax = custom_axis;
+            poly =  polygon.CreateRegularByLength(...
+                0,...
+                0,...
+                10,...
+                2);
+            poly.SetCanvas(ax);
+            poly.Show;
+            
+            offset = 10;
+            
+            poly2 = polygon.CreateFromList(...
+                poly.sides,...
+                poly.Offset(offset));
+            
+            %poly2 = polygon.CreateFromOffset(poly,2);
+            poly2.SetCanvas(ax);
+            poly2.SetColor([1,0,0])
+            poly2.Show;
+        end%function.
         
     end%methods (Demonstrations)
     %Low-level SPECIALIZED routines SPECIFIC TO THE CLASS.
@@ -2801,7 +2915,8 @@ classdef polygon < handle
                 end%ii
             end%kk
         end%function
-        
+        function contains = ContainmentConcavePolygonvsPoint(sides,XY,xp,yp)
+        end%function
         
         %Standalone measuring functions.
         function A = Area(sides,XY)
@@ -2825,12 +2940,6 @@ classdef polygon < handle
             %point manually.
             P = P + sqrt((XY(1,1) - XY(sides,1))^2 +...
                     (XY(1,2) - XY(sides,2))^2);
-        end%function
-        function K = Curvature(sides,XY,K)
-            %sides: Number of sides in the polygon.
-            %XY: Coordinates of the polygon.
-            %K: Discrete curvature measure.
-            
         end%function
         function [A,P] = AreaPerimeter(sides,XY)
             %Compute the Area and Perimeter simultaneously.
@@ -3054,6 +3163,35 @@ classdef polygon < handle
                         XY(iip1,2) - XY(ii,2));
                 end%jj
             end%ii
+        end%function
+        
+        function kappa = Curvature(sides,XY,kappa)
+            %This is based on the paper by Julia Cufi, Agusti Revento, and
+            %Carlos J Rodriz title: "Curvature for Polygons."
+            %Published on December 13, 2017 on the American Mathematical
+            %Monthly journal.
+            for kk = 1:1
+                switch kk
+                    case 1
+                        start = 2;
+                        next1 = 1;
+                        next2 = 2;
+                        finish = sides - 1;
+                    case 2
+                end%switch
+                for ii = start:next1:finish
+                    iip1 = ii + next1;
+                    iip2 = ii + next2;
+                    dx1 = XY(iip1,1) - XY(ii,1);
+                    dy1 = XY(iip1,2) - XY(ii,2);
+                    dx2 = XY(iip2,1) - XY(iip1,1);
+                    dy2 = XY(iip2,2) - XY(iip2,2);
+                    Li = sqrt(dx1*dx1 + dy1*dy1); %Length of segment "i"
+                    Lip1 = sqrt(dx2*dx2 + dy2*dy2); %Length of segment "i+1"
+                    angle = acos((dx2*dx1 + dy2*dy1)/(dx2*dx2 + dy2*dy2 + dx1*dx1 + dy1*dy1));
+                    kappa(ii) = 2*angle/(Li + Lip1);
+                end%ii
+            end%for
         end%function
         
     end%methods (Static)

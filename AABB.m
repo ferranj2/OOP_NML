@@ -1,4 +1,8 @@
 %% AABB.m (Axis-Aligned Bounding Boxes)
+%  Written by J.A. Ferrand B.Sc (ID: 2431646)
+%  Embry-Riddle Aeronautical University - Daytona Beach
+%  College of Engineering (COE)
+%  Department of Aerospace Engineering (AE)
 %% Description
 % Simple data structure meant as a low-order gauge on some other object's
 % size. AABB can be appended to other data structures that represent
@@ -13,7 +17,8 @@ classdef AABB < handle
         name %Name of this AABB's graphics as they will appear on axes legends.
         color %Color of AABB's graphics as will be rendered in an axes object.
         canvas %Handle to the axes on which to render the AABB.
-        sketches %Structure with the handles to the AABB's graphics.
+        sketches %Structure with the handles to the AABB's graphics.        
+        refresh_rate
     end%properties (Public)
     %DEFINING DATA variables
     properties (SetAccess = private)
@@ -33,6 +38,10 @@ classdef AABB < handle
         canvas_set %Whether this AABB was an axes set for rendering.
         graphics_initialized %Whether memory for the graphics has been allocated.
         
+        generated
+        updated
+        refresh
+        
         degenerate %Flag AABB that share the same coordinate in p1 and p2.
         valid %Flag to see if the basic operations can be performed on the object.
     end%properties(Protected)
@@ -42,11 +51,21 @@ classdef AABB < handle
         function this = AABB(varargin)
             this.name = 'AABB';
             this.color = [0,0,0];
-            this.graphics_initialized = false;
+            this.graphics_initialized = false; %DEPRECATE
             this.canvas_set = false;
             this.sketches = struct(...
                 'Box',[],...
                 'Center',[]);
+            this.generated = struct(...
+                'Box',false,...
+                'Center',false);
+            this.updated = struct(...
+                'Box',false,...
+                'Center',false);
+            this.refresh = struct(...
+                'Box',false,...
+                'Center',false);
+            this.refresh_rate = 100;
             
             this.valid = false;
             this.dim = [];
@@ -85,8 +104,10 @@ classdef AABB < handle
                 valid_input = false;
             end%while
         end%function
-        %Create a random AABB from an input dimension
+        
+        %Custom Creation Routines
         function box = CreateRandom(dim,max_sizes)
+            %Create a random AABB from an input dimension
             box = AABB;
             if nargin == 0
                 dim = 2; %Default dimension is 2.
@@ -116,13 +137,18 @@ classdef AABB < handle
             end %ii
             box.authenticate;
         end%function        
-        %Create a bounding box from a list of points.
         function box = CreateFromList(dim,points,XY)
+            %Create a bounding box from a list of points.
             box = AABB;
             box.dim = dim;
             [box.p2, box.p1] = AABB.GlobalExtremaOfList(dim,points,XY);
             box.valid = true;
         end%function
+        function box = CreateInCircle(xc,yc,R)
+        end%function
+        function box = CreateOutCircle
+        end
+        
     end%methods (Static)
     %High-level instance MODIFICATION and QUERY routines.
     methods
@@ -236,7 +262,7 @@ classdef AABB < handle
             if this.dim ~= AABB2.dim
                 error('AABBs are of different sizes.');
             end%if
-            inside = AABB.AABBinsideAABB(...
+            inside = AABB.ContainmentAABBvsAABB(...
                 this.dim,...
                 this.p1,...
                 this.p2,...
@@ -244,6 +270,7 @@ classdef AABB < handle
                 AABB2.p2);
         end%function
         
+        %DEPRECATE
         %Draw the bounding box
         function Draw(this,ax)
             if ~this.valid
@@ -264,7 +291,8 @@ classdef AABB < handle
             this.sketches.Box.YData = [this.p1(2),this.p1(2),this.p2(2),this.p2(2),this.p1(2)];
             
         end%function
-        
+        %DEPRECATE
+        %DEPRECATE
         %Draw the AABB's center
         function DrawCenter(this,ax)
             if ~this.valid
@@ -289,7 +317,7 @@ classdef AABB < handle
             end%if
             
         end%function
-        
+        %DEPRECATE
         %Redefine a box by replacing points
         function RedefinePoints(this,dim,p1,p2)
             this.dim = AABB.branchless_max(this.dim,dim);
@@ -311,6 +339,31 @@ classdef AABB < handle
                 UpdateRaw(this);
             end%if
         end%function
+        
+        
+        function RedefineByAugmentingPoint(this,p2)
+            %Input a point. Any components of the input greater than this
+            %AABB's p2's components are overwritten into the AABB's p2's
+            %respective component.
+            if ~this.valid
+                error('AABB is in invalid state.');
+            end%if
+            for ii = 1:this.dim
+                this.p2(ii) = AABB.branchless_max(this.p2(ii),p2(ii));
+            end%ii
+        end%function
+        function RedefineByDecreasingPoint(this,p1)
+            %Input a point. Any components of the input less than this
+            %AABB's p1's components are overwritten into the AABB's p1's
+            %respective component.
+            if ~this.valid
+                error('AABB is in invalid state.');
+            end%if
+            for ii = 1:this.dim
+                this.p1(ii) = AABB.branchless_min(this.p1(ii),p1(ii));
+            end%ii
+        end%function
+      
         
     end%methods (Ordinary)
     %GRAPHICAL SETUP routines .
@@ -335,6 +388,13 @@ classdef AABB < handle
         end%function
         
         %Set the axes object onto which to draw the graphics.
+        function SetRefreshRate(this,rate)
+            %Set a target refresh rate for the Refresh routine.
+            if rate == 0
+                rate = 1;
+            end%if
+            this.refresh_rate = rate*(-1*(rate < 0));
+        end%function
         function SetCanvas(this,ax)
             this.canvas = ax;
             this.canvas_set = true;
@@ -498,7 +558,7 @@ classdef AABB < handle
             end%ii
         end%function
     end%methods (Demonstrations)
-    %Low-level SPECIALIZED routines
+    %Low-level SPECIALIZED routines.
     methods (Static)
         %Create from an AABB from two points.
         function this = Create2P(dim,p1,p2)
@@ -515,6 +575,7 @@ classdef AABB < handle
             this.valid = true;
         end%function
         
+        %DEPRECATE
         %Check if two AABB's overlap
         function overlap = OverlapsAABB(AABB1,AABB2)
             if ~AABB1.valid
@@ -526,14 +587,15 @@ classdef AABB < handle
             if AABB1.dim ~= AABB2.dim
                 error('AABBs are of different dimensions!');
             end%if
-            overlap = AABB.BoxesOverlap(...
+            overlap = AABB.OverlapAABBvsAABB(...
                 AABB1.dim,...
                 AABB1.p1,...
                 AABB1.p2,...
                 AABB2.p1,...
                 AABB2.p2);
         end%function
-                
+        %DEPRECATE        
+        
         %Check if one AABB is inside another AABB
         function inside = ContainsAABB(AABB1,AABB2)
             if ~AABB1.valid
@@ -546,7 +608,7 @@ classdef AABB < handle
                 error('AABBs are of different dimensions!');
             end%if
             %Check the definition of this function further below.
-            inside = AABB.AABBinsideAABB(...
+            inside = AABB.ContainmentAABBvsAABB(...
                 AABB1.dim,...
                 AABB2.p1,...
                 AABB2.p2,...
@@ -562,12 +624,20 @@ classdef AABB < handle
             end%ii
         end%function
         
+        
+        
     end%methods(Static)
-    %Low-level "QUALITY OF LIFE" routines
+    %Low-level ELEMENTARY routines
     methods (Static)
-        % Check whether the bounding boxes overlap. This method does not
-        % check if one AABB is inside the other.
-        function overlap = BoxesOverlap(dim,p1,p2,p3,p4)
+        
+        %Overlap tests (Whether the intersection of space occupied by the
+        %AABB and another object is not the null set). Except for the AABB
+        %vs. AABB test, all other overlap tests are raw in the sense that
+        %they skip checking whether the AABB of the target object even
+        %overlaps the test AABB.
+        function overlap = OverlapAABBvsAABB(dim,p1,p2,p3,p4)
+            %Check whether the bounding boxes overlap. This method does not
+            %check if one AABB is inside the other.
             %p1: Minimal coordinates of AABB#1.
             %p2: Maximal coordinates of AABB#1.
             %p3: Minimal coordinates of AABB#2.
@@ -584,9 +654,80 @@ classdef AABB < handle
                 end%if
             end%ii
         end%function
+        function overlap = OverlapAABBvsCircle(p1,p2,xc,yc,R)
+            %Test if the AABB overlaps a circle.
+            %WARNING: This routine assumes that "p1" and "p2" are arrays of
+            %length 2. The user must make sure that this is the case.
+            p3 = [xc - R, yc - R];
+            p4 = [xc + R, yc + R];
+            overlap = AABB.OverlapAABBvsAABB(2,p1,p2,p3,p4);
+            if ~overlap
+                return;
+            end%if
+            clear p3;
+            clear p4;
+            R2 = R*R; %Radius squared.
+            c1 = (p1(1) - xc)^2 + (p1(2) - yc)^2 < R2;
+            c2 = (p2(1) - xc)^2 + (p1(2) - yc)^2 < R2;
+            c3 = (p2(1) - xc)^2 + (p2(2) - yc)^2 < R2;
+            c4 = (p1(1) - xc)^2 + (p2(2) - yc)^2 < R2;
+            overlap = overlap*(c1 || c2 || c3 || c4);
+        end%function
+        function overlap = OverlapAABBvsEllipse(p1,p2)
+            %Use the ellipse formulas.
+        end%function
+        function overlap = OverlapAABBvsPolygon(p1,p2,sides,XY,closed)
+            
+            %WIP: THIS ROUTINE IS INCOMPLETE.
+            
+            %This routine should be called after the AABB of the polygon is
+            %found to overlap the test AABB.
+            [x_sorted,x_perm] = sort(XY(:,1));
+            [y_sorted,y_perm] = sort(XY(:,2));
+            
+            %Find the index into the sorted X-coordinates. Find the first
+            %index immediately after the left edge of the AABB.
+            idx_x_min = 1;
+            while p1(1) < x_sorted(idx_x_min)
+                idx_x_min = idx_x_min + 1;
+            end%while
+            idx_x_min = idx_x_min - 1; %Subtract one from this index.
+            
+            %Now, find the index into the sorted Y-coordinates
+            idx_x_max = idx_x_min;
+            while p2(1) < x_sorted(idx_x_max) && idx_x_max < sides
+                idx_x_max = idx_x_max + 1;
+            end%while
+
+            %Same as before, but for the y-coordinates.
+            idx_y_min = 1;
+            while p1(2) < y_sorted(idx_y_min)
+                idx_y_min = idx_y_min + 1;
+            end%while
+            idx_y_min = idx_y_min - 1;
+            idx_y_max = idx_y_min;
+            while p2(2) < y_sorted(idx_y_max) && idx_y_max < sides
+                idx_y_max = idx_y_max + 1;
+            end%while
+            
+            
+            overlap = true;
+            clear x_sorted;
+            clear y_sorted;
+            clear x_perm;
+            clear y_perm;
+        end%function
         
-        %Check if an AABB#1 is inside AABB#2.
-        function inside = AABBinsideAABB(dim,p1,p2,p3,p4)
+        %Containment tests (Whether AABB encloses another object).
+        function contains = ContainmentAABBvsPoint(dim,p1,p2,p3)
+            %Check whether this AABB encloses a point.
+            contains = true; %"Innocent until proven guilty"
+            for ii = 1:dim
+                contains =  contains*(p1(ii) < p3(ii) & p3(ii) < p2(ii));
+            end%ii
+        end%function
+        function contains = ContainmentAABBvsAABB(dim,p1,p2,p3,p4)
+            %Check if an AABB#1 is inside AABB#2.
             %p1: Minimal coordinates of AABB#1.
             %p2: Maximal coordinates of AABB#1.
             %p3: Minimal coordinates of AABB#2.
@@ -594,7 +735,7 @@ classdef AABB < handle
             %This checks if the AABB defined by p1 and p2 is inside the
             %AABB defined by p3 and p4.
             
-            inside = true; %"Innocent until proven guilty."
+            contains = true; %"Innocent until proven guilty."
             for ii = 1:dim %For all dimensions
                 size1 = p2(ii) - p1(ii);
                 size2 = p4(ii) - p3(ii);
@@ -602,19 +743,42 @@ classdef AABB < handle
                 %If AABB#2 is smaller than AABB#1 in any dimension, there
                 %is no way AABB#1 can fit inside AABB#2.
                 if size2 < size1
-                    inside = false;
+                    contains = false;
                     return;
                 end%if
                
                 %If AABB#1 is not fully between AABB#2 in all coordinates,
                 %then it is  not inside AABB#2.
                 if ~(p3(ii) < p2(ii) && p2(ii) < p4(ii)) || ~(p3(ii) < p1(ii) && p1(ii) < p4(ii))
-                    inside = false;
+                    contains = false;
                     return;
                 end%if
             end%ii
         end%function
-        
+        function contains = ContainmentAABBvsCircle(box,circ)
+            if box.dim ~= 2
+                error('AABB''s dimension is not 2!')
+            end%if
+            if ~circ.valid
+                error('Circle is flagged as invalid.')
+            end%if
+            contains = true;
+            for ii = 1:2
+            end%ii
+            
+            
+            if box.p2(1) - box.p1(1) < 2*circ.R
+                contains = false;
+                return;
+            end%if
+            
+            
+        end%function
+        function contains = ContainmentAABBvsEllipse(box,elli)
+        end%function
+        function contains = ContainmentAABBvsPolygon(box,poly)
+        end
+  
         %Given a list of points with many components, find the maximum and
         %minimum values found in said list.
         function [p_max, p_min] = GlobalExtremaOfList(dim,points,XY)
