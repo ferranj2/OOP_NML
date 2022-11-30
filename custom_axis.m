@@ -11,7 +11,7 @@ ax.Box = 'on';
 ax.NextPlot = 'Add'; %Normies use the "hold on" command.
 %ax.XLim = [-1,+1];
 %ax.YLim = [-1,+1];
-axis(ax,'square');
+axis(ax,'equal');
 
 %X-labels
 ax.XLabel.Interpreter = 'latex';
@@ -25,8 +25,15 @@ ax.YLabel.FontName = 'TimesNewRoman';
 ax.YAxis.TickLabelInterpreter = 'latex';
 ax.YAxis.Label.String = 'Y'; %Default string to display.
 
+%Z-labels
+ax.ZLabel.Interpreter = 'latex';
+ax.ZLabel.FontName = 'TimesNewRoman';
+ax.ZAxis.TickLabelInterpreter = 'latex';
+ax.ZAxis.Label.String = 'Z'; %Default string to display.
+
 %Grid-related.
 ax.XGrid = 'on';
 ax.YGrid = 'on';
+ax.ZGrid = 'on';
 
 end
