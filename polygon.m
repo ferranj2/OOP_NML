@@ -27,123 +27,66 @@
 %%
 % $\hat{P} = P + \lambda \nabla^{2}(P)$
 %%
-% Discrete Curvature
+% Discrete Curvature (Based on area)
 %%
-% $\kappa_{k} = \frac{2\alpha_{k}\pi}{L_{k-1} + L_{k}}$
+% $\kappa_{i} = \frac{2\alpha_{k}\pi}{L_{k-1} + L_{k}}$
+%%
+% Discrete Curvature (based on angles an 3-point circle)
+%%
+% $\kappa_{i} = \frac{1}{R} \sqrt{\frac{\alpha_{i} + \beta_{i}}{\sin{\alpha_{i}}+\sin{\beta_{i}}}}$
 %% Class definition
 classdef polygon < handle
     %CUSTOMIZATION variables
     properties (SetAccess = public)
+        linewidth %(of the curve and last edge).
         name %Name of the polygon's graphics as they appear on axes legend.
         color %Color of polygon's graphics as will be rendered in an axes object.
         canvas %Axes object on which to draw the polygon.
         sketches %Structure containing handles to the object's graphics.
-        refresh %Structure holding boolean values that control which graphics refresh.
-        updated %Structure holding boolean values that track graphics state of date.
-        generated %Structure holding boolean values that track whether certain graphics are generated.
         refresh_rate %A parameter that determines how long (ideally) calls to Refresh shoul take.
     end%properties
     %DEFINING DATA variables
     properties (SetAccess = private)
         sides %Number of sides (and coordinates).
         XY %XY coordinates (1st column is for x-values, 2nd for y-values.)
+        open %Flag to denote whether the polygon should be thought of as an open curve.
     end%properties
     %METRIC variables
     properties (SetAccess = protected)
         aabb %Axis-Aligned bounding box of this polygon.
         orientation %Whether the normals point inward (true) or outward (false).
-        nxy %XY components of the normal vectors at each segment.
-        area %Area enclosed by the polygon.
-        perimeter %Perimeter subtended by polygon.
-        simple %Flag to denote whether the polygon self-intersects.
-        convex %Flag to denote whether the polygon is convex.
-        regular %Flag to denote whether the polygon is regular.
-        open %Flag to denote whether the polygon should be thought of as an open curve.
+        nxy %XY components of the normal vectors at each segment. %DEPRECATE
+        area %Area enclosed by the polygon (GLOBAL). 
+        perimeter %Perimeter subtended by polyline (GLOBAL).
+        simple %Flag to denote whether the polygon self-intersects (GLOBAL).
+        convex %Flag to denote whether the polygon is convex (GLOBAL). 
+        regular %Flag to denote whether the polygon is regular (GLOBAL). 
         xc %X-coordinate of the centroid.
-        yc %Y-coordinate of the centroid.
-        
+        yc %Y-coordinate of the centroid. 
         SI %#of self-intersections.
         xSI %X-coordinates of self-intersections (SI by 1 array).
         ySI %Y-coordinates of self-intersections (SI by 1 array).
         sSI %Segments involved in self intersection (SI by 2 array).
-    end    
+        
+        metL %"Local" vertex-wise metrics.
+        
+    end%properties    
     %FLAG and STATE variables.
     properties (Hidden = true)
         %Graphics-related flags.
-        graphics_initialized %Whether "line" and or "quiver" have been generated.
-        normals_computed %Whether the inward/outward normals have been computed.
+        refresh %Structure holding boolean values that control which graphics refresh.
+        updated %Structure holding boolean values that track graphics state of date.
+        generated %Structure holding boolean values that track whether certain graphics are generated.
         canvas_set %Whether an axes object has been initialized.
-        AABB_present
-        vertex_labels_on
-        segment_labels_on
-        last_edge %This is the line that connects the first point to the last one.
         
+        metL_alloc %Flags to indicate whether buffers for metL have been allocated.        
+        
+        normals_computed %Whether the inward/outward normals have been computed.
+        AABB_present
         valid %Whether this instance has a valid definition.
     end%properties (Hidden)    
     %High-level instance CREATION routines.
     methods (Static)
-        %Constructor
-        function this = polygon(varargin)
-            %Defining and metric data.
-            this.XY = [];%KEEP
-            this.simple = [];%KEEP
-            this.convex = [];%SKIP
-            this.open = [];%KEEP
-            this.area = [];%KEEP
-            this.perimeter = [];%KEEP
-            this.xc = [];%SKIP
-            this.yc = [];%SKIP
-            
-            %Self-Intersections
-            this.SI = 0; %KEEP
-            this.xSI = []; %KEEP
-            this.ySI = []; %KEEP
-            this.sSI = []; %KEEP
-            
-            %Graphics related.
-            this.sketches = struct(...
-                'Curve',[],...
-                'Normals',[],...
-                'Centroid',[],...
-                'SelfIntersect',[],...
-                'Vertex_Labels',[],...
-                'Segment_Labels',[]);
-            this.refresh = struct(...
-                'Curve',true,...
-                'Normals',false,...
-                'Centroid',false,...
-                'SelfIntersect',true,...
-                'Vertex_Labels',false,...
-                'Segment_Labels',false);
-            this.updated = struct(...
-                'Curve',false,...
-                'Normals',false,...
-                'Centroid',false,...
-                'SelfIntersect',false,...
-                'Vertex_Labels',false,...
-                'Segment_Labels',false);
-            this.generated = struct(...
-                'Curve',false,...
-                'Normals',false,...
-                'Centroid',false,...
-                'SelfIntersect',false,...
-                'Vertex_Labels',false,...
-                'Segment_Labels',false);
-            
-            
-            this.refresh_rate = 1;%Desired refresh rate in Hz;
-            
-            this.name = 'Polygon';
-            this.color = [0,0,0];
-            
-            %Flag and state variables.
-            this.vertex_labels_on = false;
-            this.segment_labels_on = false;
-            this.graphics_initialized = false;
-            this.normals_computed = false;
-            this.orientation = [];
-            this.AABB_present = (exist('AABB','file') == 2);
-        end%function
         
         %Custom creation routines.
         function poly = CreateRegularByLength(x0,y0,sides,length)
@@ -153,19 +96,20 @@ classdef polygon < handle
             poly = polygon;
             poly.sides = sides;
             poly.Calloc(sides);
+            poly.XY = CircularPolarLoop(...
+                poly.XY,... %The polyline's buffer after calling "Calloc."
+                poly.sides,... %The size of the buffer.
+                length/(2*sin(d_theta)),... %This is the formula for a circle's segment.
+                0,... %Start arc from 0 and...
+                2*pi); %... end it at 2*pi to get the full circle.
             
-            %Can this be replaced with a "polar loop"?
-            theta = 0;
-            d_theta = 2*pi/sides;
-            R = length/(2*sin(d_theta)); %This is the formula for a circle's segment.
-            for ii = 1:sides
-                poly.XY(ii,1) = x0 + R*cos(theta);
-                poly.XY(ii,2) = y0 + R*sin(theta);
-                theta = theta + d_theta;
+            %Maybe replace this displacement loop with a function later on?
+            for ii = 1:poly.sides
+                poly.XY(ii,1) = poly.XY(ii,1) + x0; 
+                poly.XY(ii,2) = poly.XY(ii,2) + y0;
             end%ii
-            
             %Measure properties manually.
-            poly.perimeter = sides*length;
+            poly.perimeter = poly.sides*length;
             poly.area = 0.25*sides*length*length/cot(pi/sides); %Formula from circle.
             poly.xc = x0;
             poly.yc = y0;
@@ -182,33 +126,57 @@ classdef polygon < handle
             poly.simple = true;
             poly.valid = true;
         end%function
-        function poly = CreateRegularByRadius(R,sides,x0,y0)
-            if sides < 3
-                error(['A polygon needs at least three (3) sides! Input was:',num2str(sides)]);
-            end%id
+        function poly = CreateRegularByRadius(R,N,x0,y0,th1,th2)
+            %Creates a polyline of "N" edges equal in length as implied by
+            %a circular radius. The arc (open polyline) or circle (closed
+            %polyline) are centered around the origin by default. The user
+            %may specify custom centers by inputting "x0" and "y0". By
+            %default, this routine creates circles. One may specify arcs by
+            %inputting initial and final angles "th1" and "th2"
+            %respectively.
             if R == 0
                 error('Cannot input a radius of zero.');
             end%if
+            %Default polar angle limits.
+            if nargin < 5
+                th1 = 0;
+                th2 = 2*pi;
+            end%if
+            if th1 == 0 && th2 == 2*pi
+                if N < 3
+                    error(['A polygon needs at least three (3) sides! Input was:',num2str(N)]);
+                end%id
+                poly.open = false;
+            else
+                poly.open = true;
+            end%if
             poly = polygon;
-            poly.sides = sides;
-            poly.Calloc(sides);
-            
-            theta = 0;
-            d_theta = 2*pi/sides;
-            for ii = 1:poly.sides
-                poly.XY(ii,1) = x0 + R*cos(theta);
-                poly.XY(ii,2) = y0 + R*sin(theta);
-                theta = theta + d_theta;
-            end%ii
-            
+            poly.sides = N;
+            poly.Calloc(N);
+            %Create the circle centered around the origin.
+            poly.XY = polygon.CircularPolarLoop(...
+                poly.XY,... %Buffer where to store generated coordinates.
+                poly.sides,... %Number of edges.
+                R,... %Radius
+                th1,... %Initial angle (radians).
+                th2); %Final angle (radians).
+            %Displace the coordinates so that the circle is centered around
+            %user's origin.
+            if nargin > 2
+                poly.XY = polygon.DisplaceCoordinates(...
+                    poly.XY,...
+                    poly.sides,...
+                    2,...
+                    [x0,y0]);
+            end%if
             %Set Flags
-            poly.open = false;
             poly.regular = true;
             poly.convex = true;
-            poly.orientation = true; %This is oriented inwards.
+            poly.orientation = +1; %This is oriented inwards.
             poly.simple = true;
             poly.valid = true;
         end%function
+
         function poly = CreateSimpleStar(x0,y0,pairs,ri,ro)
             if pairs < 2
                 error('Need at least two pairs for a simple star!');
@@ -394,6 +362,112 @@ classdef polygon < handle
     end%methods
     %High-level instance MODIFICATION and QUERY routines.
     methods
+        %Constructor/Destructor
+        function this = polygon(varargin)
+            %Constructor
+            this.XY = [];
+            this.simple = [];
+            this.convex = [];
+            this.open = [];
+            this.area = [];
+            this.perimeter = [];
+            this.xc = [];
+            this.yc = [];
+            
+            this.metL = struct(...
+                'areas',[],...
+                'kappa',[],...
+                'angles',[],...
+                'lengths',[],...
+                'nxy',[]);
+            this.metL_alloc = struct(...
+                'areas',false,...
+                'kappa',false,...
+                'angles',false,...
+                'lengths',false,...
+                'nxy',false);        
+            
+            %Self-Intersections
+            this.SI = 0; %KEEP
+            this.xSI = []; %KEEP
+            this.ySI = []; %KEEP
+            this.sSI = []; %KEEP
+            
+            %Graphics related.
+            this.sketches = struct(...
+                'Curve',[],...
+                'LastEdge',[],...
+                'Normals',[],...
+                'Centroid',[],...
+                'SelfIntersect',[],...
+                'VertexLabels',[],...
+                'SegmentLabels',[]);
+            %{
+            struct(...
+                'Handle',[],...
+                'Generated',false,...
+                'Generator',@polygon.GenerateCurve,...
+                'Updated',false,...
+                'Refresh',false,...
+                'Refresher',@polygon.RefreshCurve)
+                %}
+            this.refresh = struct(...
+                'Curve',true,...
+                'Normals',false,...
+                'Centroid',false,...
+                'SelfIntersect',true,...
+                'VertexLabels',false,...
+                'SegmentLabels',false);
+            this.updated = struct(...
+                'Curve',false,...
+                'Normals',false,...
+                'Centroid',false,...
+                'SelfIntersect',false,...
+                'VertexLabels',false,...
+                'SegmentLabels',false);
+            this.generated = struct(...
+                'Curve',false,...
+                'Normals',false,...
+                'Centroid',false,...
+                'SelfIntersect',false,...
+                'VertexLabels',false,...
+                'SegmentLabels',false);
+            
+            %Default customization options.
+            this.refresh_rate = 60;%Desired refresh rate in Hz;
+            this.name = 'Polygon';
+            this.color = [0,0,0];
+            this.linewidth = 1;
+
+            %Flag and state variables.
+            this.normals_computed = false;
+            this.orientation = [];
+            this.AABB_present = (exist('AABB','file') == 2);
+        end%function
+        function delete(this)
+            %Graphics Cleanup
+            if this.generated.Curve
+                delete(this.sketches.Curve);
+                delete(this.sketches.LastEdge);
+            end%if
+            if this.generated.Normals
+                delete(this.sketches.Normals);
+            end%if
+            if this.generated.Centroid
+                delete(this.sketches.Centroid);
+            end%if
+            if this.generated.VertexLabels
+                for ii = 1:this.sides
+                    delete(this.sketches.VertexLabels(ii))
+                end%ii
+            end%if
+            if this.generated.SegmentLabels
+                for ii = 1:this.sides
+                    delete(this.sketches.SegmentLabels(ii))
+                end%ii
+            end%if
+        end%function
+        
         %Memory allocation
         function Calloc(this,sides)
             this.XY = zeros(sides,2); %Buffer for XY coordinates.
@@ -497,19 +571,8 @@ classdef polygon < handle
             length = this.perimeter/this.sides;
             
         end%function
-        function RedefineAsSimpleStar(this)
-            
-            
-        end%function
-        function RedefineAsComplexStar(this)
-            if mod(this.sides,2) == 0
-                warning('Support for Complex star generation is limited to odd-sides polygons.');
-                return;
-            end%if
-            
-            length = this.perimeter/this.sides;
-        end%function
-        
+
+        %DEPRECATE AFTER tensor.m matures
         %Affine Transformations (modification) MOVE to tensor.m
         function Displace(this,dx,dy)
             %[x'] = [x] + [dx]
@@ -600,8 +663,11 @@ classdef polygon < handle
             this.ComputeNormals;
             Refresh(this);
         end%function
+        %DEPRECATE AFTER tensor.m matures
 
+        
         %Custom Transformations (modification)
+        %DEPRECATE ALL ONCE tensor.m matures.
         function Smooth(this,lambda,N)
             if ~this.valid
                 error('Polygon is flagged as invalid!');
@@ -851,7 +917,9 @@ classdef polygon < handle
             %stencil points are available on both sides for central
             %difference to occur. Once the other end is reached, the scheme
             %switches to a backward difference.
-
+            skip_endpoints = true;
+            
+            
             %If # of stencil points is not specified, default to 3.
             if nargin < 3
                 N = 3;
@@ -859,18 +927,26 @@ classdef polygon < handle
             
             %Like with open curve smoothing, a minimal copy of "trailing"
             %values is needed. The "ahead" values are not needed though.
-            Nm1o2 = (N-1)*0.5; %Nm1o2 = "N minus 1 over 2"
+            Nm1 = N - 1;
+            Nm1o2 = Nm1*0.5; %Nm1o2 = "N minus 1 over 2"
             Np1o2 = Nm1o2 + 1; %This index corresponds to the middle of the central difference scheme.
-            trail_x  = zeros(1,N-1); %Stores the trailing (N-1)/2...
-            trail_y  = zeros(1,N-1); %... stencil points.
-            %trail_x  = zeros(1,Nm1o2); %Stores the trailing (N-1)/2...
-            %trail_y  = zeros(1,Nm1o2); %... stencil points.
+            trail_x  = zeros(1,Nm1o2); %Stores the trailing (N-1)...
+            trail_y  = zeros(1,Nm1o2); %... stencil points.
             
+            
+
             for ii = 1:Nm1o2 %This time, more points need to be remembered...
                 trail_x(ii) = this.XY(ii,1); %...this is because towards...
                 trail_y(ii) = this.XY(ii,2); %...the end backward schemes...
             end%ii                            ...are applied.
-                        
+            
+            trail2_x = zeros(1,N);
+            trail2_y = zeros(1,N);
+            for ii = 1:N
+                trail2_x(ii) = this.XY(this.sides-N+ii,1);
+                trail2_y(ii) = this.XY(this.sides-N+ii,2); 
+            end%ii
+            
             %Derive the first forward difference scheme.
             sequence = zeros(1,N);%Initialize a sequence buffer.
             for ii = 1:N
@@ -901,23 +977,10 @@ classdef polygon < handle
                 %*No need to update the trail_x and trail_y buffers here.*
                 
                 %Spend the original points.
-                %this.XY(ii,1) = this.XY(ii,1) + lambda*x_diffusion;
-                %this.XY(ii,2) = this.XY(ii,2) + lambda*y_diffusion;
-                %{
-                dx = lambda*x_diffusion;
-                dy = lambda*y_diffusion;
-                this.XY(ii,1) = this.XY(ii,1) + dx*0.0001;
-                this.XY(ii,2) = this.XY(ii,2) + dy*0.0001;
-                
-                
-                if sqrt(dx*dx + dy*dy) < sqrt((this.XY(ii+1,1)-this.XY(ii,1))^2 + (this.XY(ii+1,2)-this.XY(ii,2))^2)
-                   this.XY(ii,1) = this.XY(ii,1) + dx;
-                   this.XY(ii,2) = this.XY(ii,2) + dy;
-                else
-                    fprintf('Delta greater than length averted!\n');
-                end%if
-                %}
-                
+                if ~skip_endpoints
+                    this.XY(ii,1) = this.XY(ii,1) + lambda*x_diffusion;
+                    this.XY(ii,2) = this.XY(ii,2) + lambda*y_diffusion;
+                end
                 %Update Lagrange interpolation sequence.
                 for jj = 1:N
                     sequence(jj) = sequence(jj) - 1;
@@ -962,13 +1025,12 @@ classdef polygon < handle
                 this.XY(ii,2) = this.XY(ii,2) + lambda*y_diffusion;
             end%ii
             
-            %{
+            %UNCOMMENT WITH "%{
+            
+            
             %At this stage, all points elligible for central difference
             %have been spent. Backward difference on the last "(N-1)/2"
-            %points now ensus.
-            trail2_x = zeros(1,N-1);
-            trail2_y = zeros(1,N-1);
-            
+            %points now ensus.   
             for ii = (this.sides - Nm1o2):this.sides
                 %Update Lagrange sequence to derive backward difference
                 %schema.
@@ -979,20 +1041,19 @@ classdef polygon < handle
                 
                 x_diffusion = 0;%Set/Reset the X-coordinate smoothing.
                 y_diffusion = 0;%Set/Reset the Y-coordinate smoothing.
-                
                 %Reference the points behind (stored in trail_x/trail_y
                 %buffers).
-                %for jj = 1:(ii - (this.sides - Nm1o2))
-                for jj = 1:(Np1o2 + ii -this.sides + Nm1o2)
-                    t_idx = jj + sm1; %Index into the trailing buffer.
-                    t_idx = t_idx - Nm1*(Nm1 - t_idx < 0); %Push it back if it overflows.                    
-                    x_diffusion = x_diffusion + trail_x(t_idx)*FD(jj);
-                    y_diffusion = y_diffusion + trail_y(t_idx)*FD(jj);
+                for jj = 1:(ii - (this.sides - Nm1o2))
+                %for jj = 1:(Np1o2 + ii -this.sides + Nm1o2)
+                    %t_idx = jj + sm1; %Index into the trailing buffer.
+                    %t_idx = t_idx - Nm1*(Nm1 - t_idx < 0); %Push it back if it overflows.                    
+                    x_diffusion = x_diffusion + trail2_x(jj)*FD(jj);
+                    y_diffusion = y_diffusion + trail2_y(jj)*FD(jj);
                 end%jj
 
                 %Reference the points ahead
-                for jj = ((Np1o2 + ii -this.sides + Nm1o2+1)):N
-                %for jj =(1 + ii - (this.sides - Nm1o2)):N
+                %for jj = ((Np1o2 + ii -this.sides + Nm1o2+1)):N
+                for jj =(1 + ii - (this.sides - Nm1o2)):N
                     idx = ii + sequence(jj) + 1;
                     x_diffusion = x_diffusion + this.XY(idx,1)*FD(jj);
                     y_diffusion = y_diffusion + this.XY(idx,2)*FD(jj);
@@ -1001,15 +1062,18 @@ classdef polygon < handle
                 
                 %Update the permuted buffer before expending the original
                 %point.
-                trail_x(spanner) = this.XY(ii,1);
-                trail_y(spanner) = this.XY(ii,2);
-                spanner = (spanner + 1)*(spanner < Nm1o2) + 1*(spanner >= Nm1o2);
+                %trail_x(spanner) = this.XY(ii,1);
+                %trail_y(spanner) = this.XY(ii,2);
+                spanner = (spanner + 1)*(spanner < Nm1) + 1*(spanner >= Nm1);
+                %spanner = (spanner + 1)*(spanner < Nm1o2) + 1*(spanner >= Nm1o2);
                 sm1 = spanner - 1;
 
                 %Apply the smoothing operation InPlace (spend the original
                 %point).
+                if ~skip_endpoints
                 this.XY(ii,1) = this.XY(ii,1) + lambda*x_diffusion;
-                this.XY(ii,2) = this.XY(ii,2) + lambda*y_diffusion;                 
+                this.XY(ii,2) = this.XY(ii,2) + lambda*y_diffusion;     
+                end
             end%ii
             %}
             
@@ -1023,6 +1087,7 @@ classdef polygon < handle
             end%if
         end%function
         %Move to low-level
+        
         function SmoothHighOrder(this,lambda,N)
             %Applies discrete Laplacian Smoothing to the polygon according
             %to a finite difference scheme for approximating the 2nd
@@ -1054,15 +1119,17 @@ classdef polygon < handle
             end%if
             
         end%function
-        function DetectSharpTurns(this,Rf)
-            
+
+        %NEEDS TO BE COMPLETED
+        function tight = Rollercoaster(this,Rf,sink)
+                        
             sink = 1;
             
             %This routine applies a "rolling" circle type of operation to
             %flag turns that exceed the radius of the tighest turn that the
             %polygon should make.
             
-            bad_points = ones(1,this.sides); %Allocate memory for an array of flags.
+            tight = ones(1,this.sides); %Allocate memory for an array of flags.
             
             %For this to work, the polygon must be oriented inwards.
 
@@ -1185,7 +1252,7 @@ classdef polygon < handle
                     while X_sorted(nL) > (F.xc - F.R) %&& X_sorted(1) > (F.xc - F.R)
                         if F.ContainsPoint(this.XY(X_perm(nL),1),this.XY(X_perm(nL),2))
                             flags.ZData(X_perm(nL)) = 0;%"Un-NaN" the marker.
-                            bad_points(X_perm(nL)) = -1;
+                            tight(X_perm(nL)) = -1;
                         end%if
                         nL = nL - 1;
                         if nL == 0 %If even the minimum X-value is to the left, break.
@@ -1199,7 +1266,7 @@ classdef polygon < handle
                     while X_sorted(nR) < (F.xc + F.R) %&& X_sorted(poly.sides) < (F.xc + F.R)
                         if F.ContainsPoint(this.XY(X_perm(nR),1),this.XY(X_perm(nR),2))
                             flags.ZData(X_perm(nR)) = 0;%"Un-NaN" the marker.
-                            bad_points(X_perm(nR)) = -1;
+                            tight(X_perm(nR)) = -1;
                         end%if
                         nR = nR + 1;
                         if nR == (this.sides + 1)
@@ -1208,10 +1275,11 @@ classdef polygon < handle
                         end%if
                     end%while
                     needle = old_needle;
-                    input('Next?');
-                    pause(0.0001);
+                    %input('Next?');
+                    pause(0.00001);
                 end%ii
             end%kk
+            delete(F); %Deallocate the circle
 
             %Filter any ghost points
             for kk = 1:3
@@ -1226,7 +1294,6 @@ classdef polygon < handle
                         back = 1;
                         next = 1 - this.sides;
                         finish = 2;
-                        
                     case 3
                         start = 1;
                         next = 1;
@@ -1234,8 +1301,8 @@ classdef polygon < handle
                         finish = 1;
                 end%switch
                 for ii = start:next:finish
-                    if bad_points(ii - back) == -1 && bad_points(ii + next) == -1
-                        bad_points(ii) = -1;
+                    if tight(ii - back) == -1 && tight(ii + next) == -1
+                        tight(ii) = -1;
                         flags.ZData(ii) = 0;
                     end%if
                 end%ii
@@ -1243,12 +1310,48 @@ classdef polygon < handle
                     break;
                 end%if
             end%for
+        end%function
+        function RedefineAsComplexStar(this)
+            if mod(this.sides,2) == 0
+                warning('Support for Complex star generation is limited to odd-sides polygons.');
+                return;
+            end%if
+            
+            length = this.perimeter/this.sides;
+        end%function
+        %NEEDS TO BE COMPLETED
 
-            %%%%%%%%%%%%%SECOND ATTEMPT
+        %NEEDS TO BE WRITTEN
+        function RedefineAsSimpleStar(this)
+            
+        end%function
+        function targets = SpotHighCurvature
+        end%function
+        function targets = SpotSelfIntersections
+        end%function
+        function authenticate(this)
+            %Authenticator: (Corrects as much as it can before having to
+            %error).
+            this.valid = isempty(this.xc) + isempty(this.yc) + isempty(this.XY);
+            this.valid = ~this.valid;
+        end%function
+        function inside = PointInPolygon(this,XY_in)
+            %This function treats the polyline as if it were a polygon
+            
+            %First, determine whether the point is even inside the
+            %polygon's AABB
+        end%function
+        %NEEDS TO BE WRITTEN
 
+        
+        function DetectSharpTurns(this,Rf)
+
+            bad_points = this.Rollercoaster(Rf,1);
             %Extract bands of continuous bad flags.
             [L,idx] = polygon.DetectSignChanges(this.sides,bad_points);
             idx
+            
+            %Uncomment to enable blending
             
             %If the number of sign changes is even, then the the beginning
             %points do not form a tight turn. If the number of sign changes
@@ -1329,9 +1432,7 @@ classdef polygon < handle
                         circ.SetCanvas(this.canvas);
                         circ.SetColor([1,1,1]);
                         circ.Show;
-                    end
-                    
-                    
+                    end                    
                     kk = kk + 2;
                     bands = bands + 1;
                 end%if
@@ -1373,58 +1474,15 @@ classdef polygon < handle
                     %}
                 end%if
             end%if
-            
+            %}
             
             
             this.Measure;
             %%%%%%%%%%%%%SECOND ATTEMPT
 
             
-            %%%%%%%%%%%%%FIRST ATTEMPT
-            %{
-            if mod(L,2) == 1 %Odd-numbered sign changes can be are due to sharp turn
-                for ii = L-1:-2:1
-                    iim1 = ii - 1;
-                    iip1 = ii + 1;
-                    points = idx(ii) - idx(iim1); %Number of faulty points.
-
-                end%ii
-                %[XY,status,circ] = CircularFilletBlend(XY,N,idx,Rf,x1,y1,x2,y2,x3,y3,x4,y4)
-            else %Even number of sign changes.
-                for ii = L:-2:2
-                    iim1 = ii - 1;
-                    iip1 = ii + 1;
-                    points = idx(ii) - idx(iim1); %Number of faulty points.
-                    tgt1 = idx(ii);
-                    tgt2 = idx(iim1) - 1;
-                    if points > 2
-                        %Make this into a function.
-                        %Midpoint
-                        m_x = 0.5*(this.XY(tgt2,1) + this.XY(tgt1,1));
-                        m_y = 0.5*(this.XY(tgt2,2) + this.XY(tgt1,2));
-                        ex = this.XY(round(0.5*(tgt1 + tgt2)),1) - m_x;
-                        ey = this.XY(round(0.5*(tgt1 + tgt2)),2) - m_y;
-                        quiver(this.canvas,m_x,m_y,ex,ey,'Color',[1,1,1],'linewidth',1);
-                        
-                        blender = circle.CreateFilletWithRadius(...
-                            this.XY(idx(iim1) - 1,1),this.XY(idx(iim1) - 1,2),...
-                            this.XY(idx(iim1),1)    ,this.XY(idx(iim1),2),...
-                            this.XY(idx(ii) - 1,1)  ,this.XY(idx(ii) - 1,2),...
-                            this.XY(idx(ii),1)      ,this.XY(idx(ii),2),...
-                            Rf,ex,ey);
-                        %Make this into a function
-                        blender.SetColor([1,1,1]);
-                        blender.sketches.Curve.Color = [1,0,0];
-                        blender.SetCanvas(this.canvas);
-                        blender.Show;
-                    end%if
-                end%ii
-            end%if
-            %}
-            %%%%%%%%%%%%%FIRST ATTEMPT
   
             
-            delete(F); %Deallocate the circle
             %delete(flags); %Deallocate the flags.
         end%function
         function AddNoise(this,mag)
@@ -1468,7 +1526,7 @@ classdef polygon < handle
             RefreshNormals(this);
         end%function
         
-        %Measure metric properties about this polygon
+        %Measure metric properties about this polyline.
         function Measure(this)
             %Quantifyable metrics.
             this.xc = 0; %Running sum for X-coordinate of the centroid.
@@ -1520,7 +1578,6 @@ classdef polygon < handle
                     sign_yold = sign_ynew;
                     min_x = min_x*(min_x <= this.XY(ii,1)) + this.XY(ii,1)*(min_x > this.XY(ii,1));
                     min_y = min_y*(min_y <= this.XY(ii,2)) + this.XY(ii,2)*(min_y > this.XY(ii,2));
-                                        
                 end%ii
             end%kk
                         
@@ -1558,6 +1615,117 @@ classdef polygon < handle
             end%if
             
         end%function
+        function MeasureShoelace(this)
+            %Given a valid definition of a polygon this routine measures
+            %the "Shoelace" quantities: Signed Area, Signed X-Centroid, and
+            %Signed Y-Centroid.
+            this.xc = 0; %Running sum for X-coordinate of the centroid.
+            this.yc =0; %Running sum for Y-coordinate of the centroid.
+            this.area = 0; %Initialize a running sum for the area
+            
+            %Allocate memory for the local metrics
+            this.metL.areas = zeros(1,this.sides);
+            this.metL_alloc.areas = true;
+            for kk = 1:2
+                switch kk
+                    case 1
+                        start = 1;
+                        next = 1;
+                        finish = this.sides;
+                    case 2
+                        start = this.sides;
+                        next = 1 - this.sides;
+                        finish = 2;
+                end%
+                for ii = start:next:finish
+                    iip1 = ii + next;
+                    %Make this a function
+                    dA = this.XY(ii,1)*this.XY(iip1,2) - this.XY(iip1,1)*this.XY(ii,2);
+                    %Make this a function
+                    this.area = this.area + dA;
+                    this.xc = this.xc + dA*(this.XY(ii,1) + this.XY(iip1,1));
+                    this.yc = this.yc + dA*(this.XY(ii,2) + this.XY(iip1,2));
+                end%ii
+            end%kk
+            %Apply correction factors to the shoelace formula.
+            this.area = this.area*0.5;
+            this.xc = this.xc/(6*this.area);
+            this.yc = this.yc/(6*this.area);
+        end%function
+        function MeasureLAKN(this)
+            %"LAKN" = Lengths, Angles, Kappa, and Normals.
+            %Given a valid definition of a polygon, this routine measures
+            %the lengths (L-2 norms) of the edges of the polygon's
+            %boundaries and the interior angles of the vertices.
+            
+            %Allocate memory for the local metrics
+            this.metL.lengths = zeros(1,this.sides);
+            this.metL.angles = zeros(1,this.sides);
+            this.metL.kappa = zeros(1,this.sides);
+            this.metL.nxy = zeros(this.sides,2);
+
+            %Update flag buffers.
+            this.metL_alloc.lengths = true;
+            this.metL_alloc.angles = true;
+            this.metL_alloc.kappa = true;
+            this.metL_alloc.nxy = true;
+            
+            %Manually compute the lengths and displacements of the last
+            %segment. This avoids recomputing the "dx" and "dy" quantities
+            %twice except for the last segment.
+            dxiim1 = this.XY(1,1) - this.XY(this.sides,1);
+            dyiim1 = this.XY(1,2) - this.XY(this.sides,2);
+            for kk = 1:3
+                switch kk
+                    case 1 %First Vertex
+                        start = 1;
+                        next = 1;
+                        back = 1 - this.sides;
+                        finish = 1;
+                    case 2 %Middle Vertices
+                        start = 2;
+                        next = 1;
+                        back = 1;
+                        finish = this.sides - 1;
+                    case 3 %Last Vertex
+                        start = this.sides;
+                        next = 1 - this.sides;
+                        back = 1;
+                        finish = 3;
+                end%switch
+                for ii = start:next:finish
+                    iip1 = ii + next;
+                    iim1 = ii - back;
+                    dxii = this.XY(iip1,1) - this.XY(ii,1);
+                    dyii = this.XY(iip1,2) - this.XY(ii,2);
+                    
+                    %Compute the length;
+                    this.metL.lengths(ii) = sqrt(dxii*dxii + dyii*dyii);
+                    
+                    %Compute the unit normal components using a hardcoded
+                    %90 degree CCW rotation.
+                    this.metL.nxy(ii,1) = -dyii/this.metL.lengths(ii);
+                    this.metL.nxy(ii,2) = +dxii/this.metL.lengths(ii);
+
+                    %Computation of internal angles and curvature.
+                    this.metL.angles(ii) = acos((dxii*dxiim1 + dyii*dyiim1)/(this.metL.lengths(ii)*this.metL.lengths(iim1)));                    
+                    if dxiim1*dyii - dxii*dyiim1 < 0 %Determine reflex vs. convex vertex from cross product.
+                        this.metL.angles(ii) = 2*pi - this.metL.angles(ii);
+                    end%if               
+                    
+                    %Computation of curvature.
+                    this.metL.kappa(ii) = 2*(pi - this.metL.angles(ii))/(this.metL.lengths(ii) + this.metL.lengths(iim1));
+                                        
+                    %Remember the quantity computed here to avoid
+                    %recomputation.
+                    dxiim1 = dxii;
+                    dyiim1 = dyii;
+                end%ii
+            end%for
+        end%function
+        function MeasureNormals
+        end%function
+        
         
         function FilterSelfIntersections(this)
             % THIS NEEDS A LOT MORE WORK!!!
@@ -1595,11 +1763,7 @@ classdef polygon < handle
        
         end%function
         
-        
-        %Query routines
-        function inside = IsInside(this,XY_in)
-        
-        end%function
+
         function XY_out = Offset(this,offset)
             if ~this.valid
                 error('Polygon is flagged as invalid.');
@@ -1612,50 +1776,14 @@ classdef polygon < handle
             
         end%function
         
-        %Authenticator: (Corrects as much as it can before having to
-        %error).
-        function authenticate(this)
-            this.valid = isempty(this.xc) + isempty(this.yc) + isempty(this.XY);
-            this.valid = ~this.valid;
-        end%function
-        
-        %Reset function: (Sets all validity-related flags to false. This is
-        %to be called at the beginning of functions that redefine an
-        %already-existing data structure).
-        function reset(this)
-            this.normals_computed = false;
-            this.valid = false;
-            this.simple = [];
-            this.convex = [];
-            this.orientation = [];
-        end%function.
-        
+
+       
         
     end%methods
     %Graphical setups.
     methods
-        %Whether the polygon is to be drawn.
-        function Show(this)
-            %Make sure this object has a definition that is valid.
-            if ~this.valid
-                warning('The polygon object does not have a valid definition!');
-                return;
-            end%if
-            %Check if the object has a designated canvas to be drawn on.
-            if ~this.canvas_set %nope?
-                warning('No canvas set prior to drawing query. New canvas created.');
-                this.canvas = custom_axis; %Then make one.
-                this.canvas_set = true;
-            end%if
-            %If graphics do not exist, create them.
-            if ~this.graphics_initialized 
-                InitializeGraphics(this);
-            end%if
-            %Bounding Box initialization.
-            if this.AABB_present
-                this.aabb.Show;
-            end%if
-        end%function
+        
+        %Whether the polygon is to be drawn.       
         function stamp = Imprint(this)
             if ~this.canvas_set
                 warning([this.name, ' does not have a canvas set. Cannot stamp!']);
@@ -1680,11 +1808,16 @@ classdef polygon < handle
         end%function
         function SetName(this,string)
             this.name = string;
-            if this.graphics_initialized
+            if this.generated.Curve
                 this.sketches.Curve.DisplayName = string;
+            end%if
+            if this.generated.Normals
                 this.sketches.Normals.DisplayName = [string,'''s Normals'];
+            end%if
+            if this.generated.Centroid
                 this.sketches.Centroid.DisplayName = [string,'''s Centroid'];
             end%if
+            
             %Bounding Box initialization.
             if this.AABB_present
                 this.aabb.SetName(string)
@@ -1692,119 +1825,85 @@ classdef polygon < handle
         end%function        
         function SetColor(this,RGB)
             this.color = RGB;
-            if this.graphics_initialized
+            if this.generated.Curve
                 this.sketches.Curve.Color = RGB;
-                this.last_edge.Color = RGB;
-                this.sketches.Normals.Color = RGB;
-                this.sketches.Centroid.MarkerFaceColor = RGB;
-                if this.generated.Vertex_Labels
-                    for ii = 1:this.sides
-                        this.sketches.Vertex_Labels(ii).Color = RGB;
-                    end%ii
-                end%if
-                if this.generated.Segment_Labels
-                    for ii = 1:this.sides
-                        this.sketches.Segment_Labels(ii).Color = RGB;
-                    end%ii
-                end%if
+                this.sketches.LastEdge.Color = RGB;
             end%if
+            if this.generated.Normals
+                this.sketches.Normals.Color = RGB;
+            end%if
+            if this.generated.Centroid
+                this.sketches.Centroid.MarkerFaceColor = RGB;
+            end%if
+            if this.generated.VertexLabels
+                for ii = 1:this.sides
+                    this.sketches.VertexLabels(ii).Color = RGB;
+                end%ii
+            end%if
+            if this.generated.SegmentLabels
+                for ii = 1:this.sides
+                    this.sketches.SegmentLabels(ii).Color = RGB;
+                end%if
+            end %if
+
             %Bounding Box initialization.
             if this.AABB_present
                 this.aabb.SetColor(RGB);
             end%if
             
-            
         end%function
         function SetCanvas(this,ax)
             this.canvas = ax;
             this.canvas_set = true;
-            if this.AABB_present
-                this.aabb.SetCanvas(ax)
-            end%if
-            if this.graphics_initialized
-                %If AABB.m is in the same folder as polygon.m
-                if this.AABB_present
-                    this.aabb.sketches.Box.Parent = ax;
-                    this.aabb.sketches.Center.Parent = ax;
-                end%if
+            if this.generated.Curve
                 this.sketches.Curve.Parent = ax;
+                this.sketches.LastEdge.Parent = ax;
+            end%if
+            if this.generated.Centroid
                 this.sketches.Centroid.Parent = ax;
+            end%if
+            if this.generated.Normals
                 this.sketches.Normals.Parent = ax;
+            end%if
+            if this.generated.VertexLabels
                 for ii = 1:this.sides
-                    this.sketches.Vertex_Labels(ii) = ax;
-                    this.sketches.Segment_Labels(ii) = ax;
+                    this.sketches.VertexLabels(ii).Parent = ax;
                 end%ii
+            end%if
+            if this.generated.SegmentLabels
+                for ii = 1:this.sides
+                    this.sketches.SegmentLabels(ii).Parent = ax;
+                end%ii
+            end%if
+            
+            if this.AABB_present
+          %      this.aabb.SetCanvas(ax)
+            end%if
+        end%function
+        function SetLineWidth(this,width)
+            this.linewidth = width;
+            if this.generated.Curve
+                this.sketches.Curve.LineWidth = width;
+                this.sketches.LastEdge.LineWidth = width;
             end%if
         end%function
         
         %Create the Graphical objects.
+        %DEPRECATE
         function InitializeGraphics(this)
             %This function assumes that a canvas has been set already.
-            %This will sketch the circle.
-            this.sketches.Curve = line(...
-                'Parent',this.canvas,...
-                'Color',this.color,...
-                'XData',zeros(1,this.sides + 1),... %Do not initalize with empty ("[]" ) because...
-                'YData',zeros(1,this.sides + 1),... %MATLAB won't allow ANY property access otherwise.
-                'Linewidth',1,...
-                'LineStyle','-',...
-                'DisplayName',this.name);
-            this.last_edge = line(...
-                'Parent',this.canvas,...
-                'Color',this.color,...
-                'XData',[this.XY(this.sides,1),this.XY(1,1)],...
-                'YData',[this.XY(this.sides,2),this.XY(1,2)],...
-                'Linewidth',1,...
-                'LineStyle','-');
-            if this.open
-                this.last_edge.LineStyle = '--';
-            end%if
-            this.generated.Curve = true;
-            RefreshCurve(this);
+            this.GenerateCurve;
+            this.RefreshCurve;
             
-            %Draw the polygon's centroid.
-            this.sketches.Centroid = line(...
-                this.canvas,...
-                this.xc,...
-                this.yc,...
-                'Marker','x',...
-                'MarkerFaceColor',this.color,...
-                'MarkerEdgeColor',[0,0,0],...
-                'Visible','off',...
-                'DisplayName',[this.name,' centroid']);
-            this.generated.Centroid = true;
+            this.GenerateCentroid;
+            this.RefreshCentroid;
 
+            this.GenerateNormals;
+            this.RefreshNormals;
             
-            %Draw the normal vectors at the midpoint of the edges of the
-            %polygon.
-            this.sketches.Normals = quiver(...
-                this.canvas,...
-                zeros(this.sides,1),...
-                zeros(this.sides,1),...
-                zeros(this.sides,1),... %Normals must be precomputed prior to... 
-                zeros(this.sides,1),... %... drawing this quiver object.
-                'AutoScale','on',...
-                'Color',this.color,...
-                'Visible','off',...
-                'DisplayName',[this.name,' Orientation']);     
-            this.generated.Normals = true;
-            RefreshNormals(this);
-            
-            %Generate markers to flag self intersections if any.
-            this.sketches.SelfIntersect = line(...
-                'Parent',this.canvas,...
-                'Color',this.color,...
-                'XData',this.xSI,... 
-                'YData',this.ySI,... 
-                'Linewidth',1,...
-                'LineStyle','-',...
-                'Marker','d',...
-                'MarkerEdgeColor',[0,0,0],...
-                'MarkerFaceColor',this.color,...
-                'DisplayName',[this.name, 'Self-Intersections']);
-            RefreshSelfIntersect(this);
-            this.generated.SelfIntersect = true;
-            
+            this.GenerateSelfIntersections;
+            this.RefreshSelfIntersect;
+
             
             %Bounding Box initialization.
             if this.AABB_present
@@ -1829,128 +1928,24 @@ classdef polygon < handle
                 this.generated.Centroid = false;
             end%if            
 
-            if ~isempty(this.sketches.Vertex_Labels)
+            if ~isempty(this.sketches.VertexLabels)
                 for ii = this.sides:-1:1
-                    delete(this.sketches.Vertex_Labels(ii));
+                    delete(this.sketches.VertexLabels(ii));
                 end%ii
-                this.generated.Vertex_Labels = false;
+                this.generated.VertexLabels = false;
             end%if
-            if ~isempty(this.sketches.Segment_Labels)
+            if ~isempty(this.sketches.SegmentLabels)
                 for ii = this.sides:-1:1
-                    delete(this.sketches.Segment_Labels(ii));
+                    delete(this.sketches.SegmentLabels(ii));
                 end%ii
-                this.generated.Segment_Labels = false;
+                this.generated.SegmentLabels = false;
             end%if
             %Update graphics flag.
             this.graphics_initialized = false;
         end%function
-        
-        %Annotations.
-        function GenerateVertexLabels(this)
-            %WARNING: THIS ROUTINE IS GRAPHICS AND MEMORY INTENSIVE WHEN
-            %WORKING WITH LARGE POLYGONS. IF THIS ROUTINE IS DESIRED, IT IS
-            %RECOMMENDED THAT IT BE USED ONLY AS A POST-PROCESSING
-            %OPERATION. DO NOT USE IN THE MIDDLE OF OTHER INTENSIVE
-            %CALCULATIONS OR YOU WILL GET TERRIBLE PERFORMANCE AND WAIT
-            %TIMES WHILE RENDERING OR SAVING MATLAB FIGURES.
-            
-            %Prints labels for the vertices and their coordinates.
-            this.sketches.Vertex_Labels = text(...
-                this.XY(:,1),...
-                this.XY(:,2),...
-                '');
-            for ii = 1:this.sides
-                this.sketches.Vertex_Labels(ii).Color = this.color;
-                this.sketches.Vertex_Labels(ii).Visible = 'off';
-                this.sketches.Vertex_Labels(ii).Interpreter = 'latex';
-                %this.sketches.Vertex_Labels(ii).String = {...
-                %    ['V$_{',num2str(ii),'}$'],['(',num2str(this.XY(ii,1)),';',num2str(this.XY(ii,2)),')']};
-                %this.sketches.Vertex_Labels(ii).String = {...
-                %    ['V$_{',num2str(ii),'}$'];num2str(this.XY(ii,1));num2str(this.XY(ii,2))};
-                this.sketches.Vertex_Labels(ii).String =['V$_{',num2str(ii),'}$'];
-            
-            
-            end%ii
-            this.vertex_labels_on = true;            
-        end%function
-        function GenerateSegmentLabels(this)
-            %WARNING: THIS ROUTINE IS GRAPHICS AND MEMORY INTENSIVE WHEN
-            %WORKING WITH LARGE POLYGONS. IF THIS ROUTINE IS DESIRED, IT IS
-            %RECOMMENDED THAT IT BE USED ONLY AS A POST-PROCESSING
-            %OPERATION. DO NOT USE IN THE MIDDLE OF OTHER INTENSIVE
-            %CALCULATIONS OR YOU WILL GET TERRIBLE PERFORMANCE AND WAIT
-            %TIMES WHILE RENDERING OR SAVING MATLAB FIGURES.
-            
-            %Prints labels for the segments.
-            this.sketches.Segment_Labels = text(...
-                zeros(this.sides,1),...
-                zeros(this.sides,1),...
-                '');
-            for kk = 1:2
-                switch kk
-                    case 1
-                        start = 1;
-                        step = 1;
-                        finish = this.sides - 1;
-                    case 2
-                        start = this.sides;
-                        step = 1 - this.sides;
-                        finish = 2;
-                end%switch
-                for ii = start:step:finish
-                    iip1 = ii + step;
-                    this.sketches.Segment_Labels(ii).Visible = 'off';
-                    this.sketches.Segment_Labels(ii).Interpreter = 'latex';
-                    this.sketches.Segment_Labels(ii).Color = this.color;
-                    this.sketches.Segment_Labels(ii).String = ['$S_{',num2str(ii),'}$'];
-                    this.sketches.Segment_Labels(ii).Position(1) = (this.XY(iip1,1) + this.XY(ii,1))*0.5;
-                    this.sketches.Segment_Labels(ii).Position(2) = (this.XY(iip1,2) + this.XY(ii,2))*0.5;
-                end%ii
-            end%kk
-            this.segment_labels_on = true;
-        end%function
-        function GenerateSelfIntersect(this)
-            if this.simple
-                warning('This polygon is flagged as simple. Are you sure it self intersects?');
-                return;
-            end%if
-            this.sketches.SelfIntersect = line(...
-                'Parent',this.canvas,...
-                'Color',this.color,...
-                'XData',this.xSI,... 
-                'YData',this.ySI,... 
-                'Linewidth',1,...
-                'LineStyle','-',...
-                'Marker','d',...
-                'MarkerEdgeColor',[0,0,0],...
-                'MarkerFaceColor',this.color,...
-                'DisplayName',[this.name, 'Self-Intersections']);
-            this.generated.SelfIntersect = true;
-            
-        end%function
+        %DEPRECATE
         
         %Visibility toggling functions
-        function ToggleRefresh(this,varargin)
-            %Instruct the object instance which graphics to refresh
-            %whenever the Refresh routine is called.
-            for ii = 1:(nargin - 1)
-                if strcmpi(varargin{ii},'Curve') == 1
-                    this.refresh.Curve = ~(this.refresh.Curve == true);
-                end%if
-                if strcmpi(varargin{ii},'Normals') == 1
-                    this.refresh.Normals = ~(this.refresh.Normals == true);
-                end%if
-                if strcmpi(varargin{ii},'Centroid') == 1
-                    this.refresh.Centroid = ~(this.refresh.Centroid == true);
-                end%if
-                if strcmpi(varargin{ii},'Vertex_Labels') == 1
-                    this.refresh.Vertex_Labels = ~(this.refresh.Vertex_Labels == true);
-                end%if
-                if strcmpi(varargin{ii},'Segment_Labels') == 1
-                    this.refresh.Segment_Labels = ~(this.refresh.Segment_Labels == true);
-                end%if
-            end%ii
-        end%function
         function Toggle(this,varargin)
             %Sets the MATLAB "Visible" flag on the various graphics to "on"
             %or "off" depending on the flag's value at the time of calling
@@ -1970,84 +1965,86 @@ classdef polygon < handle
             
             for ii = 1:(nargin - 1)
                 if strcmpi(varargin{ii},'Curve') == 1
-                    VisibilityToggle(this,this.sketches.Curve);
-                    VisibilityToggle(this,this.last_edge);
-                    if ~this.updated.Curve && strcmp(this.sketches.Curve.Visible,'on') == 1
-                        RefreshCurve(this);
+                    if ~this.generated.Curve
+                        this.GenerateCurve;
                     end%if
+                    if ~this.updated.Curve 
+                        this.RefreshCurve;
+                    end%if
+                    this.ToggleVisible(this.sketches.Curve);
+                    this.ToggleVisible(this.sketches.LastEdge);
+                elseif strcmpi(varargin{ii},'LastEdge') == 1
+                    this.ToggleVisible(this.sketches.LastEdge);
+
                 elseif strcmpi(varargin{ii},'Centroid') == 1
-                    VisibilityToggle(this,this.sketches.Centroid);
+                    if ~this.generated.Centroid
+                        this.GenerateCentroid;
+                    end%if
                     if ~this.updated.Centroid
-                        RefreshCentroid(this);
+                        this.RefreshCentroid;
                     end%if
+                    this.ToggleVisible(this.sketches.Centroid);
                 elseif strcmpi(varargin{ii},'Normals') == 1
-                    VisibilityToggle(this,this.sketches.Normals);
-                    if ~this.updated.Normals && strcmp(this.sketches.Normals.Visible,'on') == 1
-                        RefreshNormals(this);
+                    if ~this.generated.Normals
+                        this.GenerateNormals;
                     end%if
-                elseif strcmpi(varargin{ii},'Vertex_Labels') == 1
-                    if isempty(this.sketches.Vertex_Labels)
-                        return;
+                    if ~this.updated.Normals
+                        this.RefreshNormals;
                     end%if
-                    if ~this.updated.Vertex_Labels
-                        RefreshVertexLabels(this);
+                    this.ToggleVisible(this.sketches.Normals);
+                elseif strcmpi(varargin{ii},'VertexLabels') == 1
+                    if ~this.generated.VertexLabels
+                        this.GenerateVertexLabels;
                     end%if
-                    for jj = 1:this.sides
-                        VisibilityToggle(this,this.sketches.Vertex_Labels(jj));
-                    end%jj
-                elseif strcmpi(varargin{ii},'Segment_Labels') == 1
-                    if isempty(this.sketches.Segment_Labels)
-                        return;
-                    end%if
-                    if ~this.updated.Segment_Labels
-                        RefreshSegmentLabels(this);
+                    if ~this.updated.VertexLabels
+                        this.RefreshVertexLabels;
                     end%if
                     for jj = 1:this.sides
-                        VisibilityToggle(this,this.sketches.Segment_Labels(jj));
-                    end%jj
-                elseif strcmpi(varargin{ii},'SelfIntersect') == 1
-                    if isempty(this.sketches.SelfIntersect)
-                        return;
+                        this.ToggleVisible(this.sketches.VertexLabels(jj));
+                    end%ii
+                elseif strcmpi(varargin{ii},'SegmentLabels') == 1
+                    if ~this.generated.SegmentLabels
+                        this.GenerateSegmentLabels;
                     end%if
-                    if ~this.updated.Segment_Labels
-                        RefreshSelfIntersect(this);
+                    if ~this.updated.SegmentLabels
+                        this.RefreshSegmentLabels;
                     end%if
+                    this.ToggleVisible(this.sketches.SegmentLabels);    
+                elseif strcmpi(varargin{ii},'AABB') == 1
+                    this.aabb.Show;
                 else
-                    warning('Unrecognizable graphics option. Valid options are: "Curve","Normals","Centroid", "Vertex_Labels", and "Segment_Labels"');
+                    warning('Unrecognizable graphics option. Valid options are: "Curve", "Normals","Centroid", "VertexLabels", "SegmentLabels", and "AABB"');
                 end%if
-            end
+            end%ii
         end%function
-        %NEEDS TO BE UPDATED
-        function VisibilityToggle(this,handle)
-            if ~this.graphics_initialized
-                warning(['Cannot toggle ',handle.DisplayName,' of polygon "',this.name,'" (graphics uninitialized).']);
-                return;
-            end%if
-            if ~isvalid(handle)
-                warning(['Cannot toggle ',handle.DisplayName,' of polygon "',this.name,'" (deleted handle).']);
-                return;
-            end%if
+        function ToggleVisible(this,handle)
             if strcmp(handle.Visible,'on') == 1
                 handle.Visible = 'off';
             else
                 handle.Visible = 'on';
             end%if
         end%function
-        %NEEDS TO BE UPDATED
-        function ToggleAABB(this)
-            if ~this.AABB_present
-                warning('File AABB.m is not present in the same folder as polygon.m.')
-                return;
-            end%if
-            this.aabb.ToggleBox;
+        function ToggleRefresh(this,varargin)
+            %Instruct the object instance which graphics to refresh
+            %whenever the Refresh routine is called.
+            for ii = 1:(nargin - 1)
+                if strcmpi(varargin{ii},'Curve') == 1
+                    this.refresh.Curve = ~(this.refresh.Curve == true);
+                end%if
+                if strcmpi(varargin{ii},'Normals') == 1
+                    this.refresh.Normals = ~(this.refresh.Normals == true);
+                end%if
+                if strcmpi(varargin{ii},'Centroid') == 1
+                    this.refresh.Centroid = ~(this.refresh.Centroid == true);
+                end%if
+                if strcmpi(varargin{ii},'VertexLabels') == 1
+                    this.refresh.VertexLabels = ~(this.refresh.VertexLabels == true);
+                end%if
+                if strcmpi(varargin{ii},'SegmentLabels') == 1
+                    this.refresh.SegmentLabels = ~(this.refresh.SegmentLabels == true);
+                end%if
+            end%ii
         end%function
-        function ToggleAABBCenter(this)
-            if ~this.AABB_present
-                warning('File AABB.m is not present in the same folder as polygon.m.')
-                return;
-            end%if
-            this.aabb.ToggleCenter;
-        end%function        
         
         %Graphical Refresh routines.
         function Refresh(this,varargin)
@@ -2055,38 +2052,30 @@ classdef polygon < handle
             %Set all state of date flags to false. These are all set back
             %to true by the refresh routines if the refresh flag for each
             %curve is set to true.
+
             this.updated.Curve = false;
             this.updated.Normals = false;
             this.updated.Centroid = false;
-            this.updated.Vertex_Labels = false;
-            this.updated.Segment_Labels = false;
+            this.updated.VertexLabels = false;
+            this.updated.SelfIntersect = false;
+            this.updated.SegmentLabels = false;
 
             %Refresh routines will only execute if their respective
             %graphics' state of refresh is set to true.
             if this.refresh.Curve 
                 RefreshCurve(this);
-            else
-                this.Toggle('Curve');
             end%if
             if this.refresh.Centroid
                 RefreshCentroid(this);
-            else
-                this.Toggle('Centroid');
             end%if
             if this.refresh.Normals
                 RefreshNormals(this);
-            else
-                this.Toggle('Normals');
             end%if
-            if this.refresh.Vertex_Labels
+            if this.refresh.VertexLabels
                 RefreshVertexLabels(this);
-            else
-                this.Toggle('Vertex_Labels');
             end%if
-            if this.refresh.Segment_Labels
+            if this.refresh.SegmentLabels
                 RefreshSegmentLabels(this);
-            else
-                this.Toggle('Segment_Labels');
             end%if   
             if this.refresh.SelfIntersect
                 RefreshSelfIntersect(this);
@@ -2101,26 +2090,23 @@ classdef polygon < handle
                 this.sketches.Curve.XData(ii) = this.XY(ii,1);
                 this.sketches.Curve.YData(ii) = this.XY(ii,2);
             end%ii
-            if this.open
-                this.sketches.Curve.XData(this.sides + 1) = NaN;
-                this.sketches.Curve.YData(this.sides + 1) = NaN;
-            else
-                this.sketches.Curve.XData(this.sides + 1) = this.XY(1,1);
-                this.sketches.Curve.YData(this.sides + 1) = this.XY(1,2);
-            end%if
             
             %Update the last edge.
-            this.last_edge.XData = [this.XY(this.sides,1),this.XY(1,1)];
-            this.last_edge.YData = [this.XY(this.sides,2),this.XY(1,2)];            
+            this.sketches.LastEdge.XData(1) = this.XY(this.sides,1);
+            this.sketches.LastEdge.YData(1) = this.XY(this.sides,2);
+            this.sketches.LastEdge.XData(2) = this.XY(1,1);
+            this.sketches.LastEdge.YData(2) = this.XY(1,2);
+                       
             this.updated.Curve = true;
         end%function
         function RefreshCentroid(this)
-            
             this.sketches.Cetroid.XData = this.xc;
             this.sketches.Cetroid.YData = this.yc;
             this.updated.Centroid = true;
         end%function
         function RefreshNormals(this)
+            %Updates the graphics for the Normals with the current values
+            %stored in the instance.
             for kk = 1:2
                 switch kk
                     case 1
@@ -2152,10 +2138,10 @@ classdef polygon < handle
         end%function
         function RefreshVertexLabels(this)
             for ii = 1:this.sides
-                this.sketches.Vertex_Labels(ii).Position(1) = this.XY(ii,1);
-                this.sketches.Vertex_Labels(ii).Position(2) = this.XY(ii,2);
+                this.sketches.VertexLabels(ii).Position(1) = this.XY(ii,1);
+                this.sketches.VertexLabels(ii).Position(2) = this.XY(ii,2);
             end%ii
-            this.updated.Vertex_Labels = true;
+            this.updated.VertexLabels = true;
         end%function
         function RefreshSegmentLabels(this)
 
@@ -2175,11 +2161,275 @@ classdef polygon < handle
                     
                 end%ii
             end%kk
-            this.updated.Segment_Labels = true;
+            this.updated.SegmentLabels = true;
+        end%function        
+        
+        %Graphics generation functions.
+        function GenerateCurve(this)
+            GenerateDefaultCanvas(this);
+            this.sketches.Curve = line(...
+                'Parent',this.canvas,...
+                'Color',this.color,...
+                'XData',zeros(1,this.sides),... %Do not initalize with empty ("[]" ) because...
+                'YData',zeros(1,this.sides),... %MATLAB won't allow ANY property access otherwise.
+                'Linewidth',this.linewidth,...
+                'LineStyle','-',...
+                'DisplayName',this.name,...
+                'Visible','off');
+            this.sketches.LastEdge= line(...
+                'Parent',this.canvas,...
+                'Color',this.color,...
+                'XData',[this.XY(this.sides,1),this.XY(1,1)],...
+                'YData',[this.XY(this.sides,2),this.XY(1,2)],...
+                'Linewidth',this.linewidth,...
+                'LineStyle','-',...
+                'Visible','off');
+            if this.open
+                this.sketches.LastEdge.LineStyle = '--';
+            end%if
+            this.generated.Curve = true;
         end%function
+        function GenerateCentroid(this)
+            %Draw the polygon's centroid.
+            GenerateDefaultCanvas(this);
+            this.sketches.Centroid = line(...
+                this.canvas,...
+                this.xc,...
+                this.yc,...
+                'Marker','x',...
+                'MarkerFaceColor',this.color,...
+                'MarkerEdgeColor',[0,0,0],...
+                'Visible','off',...
+                'DisplayName',[this.name,' centroid'],...
+                'Visible','off');
+            this.generated.Centroid = true;
+        end%function
+        function GenerateNormals(this)
+            %Draw the normal vectors at the midpoint of the edges of the
+            %polygon.
+            GenerateDefaultCanvas(this);
+            this.sketches.Normals = quiver(...
+                this.canvas,...
+                zeros(this.sides,1),...
+                zeros(this.sides,1),...
+                zeros(this.sides,1),... %Normals must be precomputed prior to... 
+                zeros(this.sides,1),... %... drawing this quiver object.
+                'AutoScale','on',...
+                'Color',this.color,...
+                'Visible','off',...
+                'DisplayName',[this.name,' Orientation'],...
+                'Visible','off');     
+            this.generated.Normals = true;
+        end%function
+        function GenerateSelfIntersections(this)
+            %If the polyline is complex (has self-intersections) draw
+            %markers where the intersections occur.
+            GenerateDefaultCanvas(this);
+            this.sketches.SelfIntersect = line(...
+                'Parent',this.canvas,...
+                'Color',this.color,...
+                'XData',this.xSI,... 
+                'YData',this.ySI,... 
+                'Linewidth',1,...
+                'LineStyle','-',...
+                'Marker','d',...
+                'MarkerEdgeColor',[0,0,0],...
+                'MarkerFaceColor',this.color,...
+                'DisplayName',[this.name, 'Self-Intersections'],...
+                'Visible','off');
+            this.generated.SelfIntersect = true;
+        end%function
+        function GenerateVertexLabels(this)
+            %WARNING: THIS ROUTINE IS GRAPHICS AND MEMORY INTENSIVE WHEN
+            %WORKING WITH LARGE POLYGONS. IF THIS ROUTINE IS DESIRED, IT IS
+            %RECOMMENDED THAT IT BE USED ONLY AS A POST-PROCESSING
+            %OPERATION. DO NOT USE IN THE MIDDLE OF OTHER INTENSIVE
+            %CALCULATIONS OR YOU WILL GET TERRIBLE PERFORMANCE AND WAIT
+            %TIMES WHILE RENDERING OR SAVING MATLAB FIGURES.
+            
+            %Prints labels for the vertices and their coordinates.
+            this.sketches.VertexLabels = text(...
+                this.XY(:,1),...
+                this.XY(:,2),...
+                '');
+            for ii = 1:this.sides
+                this.sketches.VertexLabels(ii).Color = this.color;
+                this.sketches.VertexLabels(ii).Interpreter = 'latex';
+                this.sketches.VertexLabels(ii).String =['V$_{',num2str(ii),'}$'];
+                this.sketches.VertexLabels(ii).Visible = 'off';
+            end%ii
+            this.generated.VertexLabels = true;
+        end%function
+        function GenerateSegmentLabels(this)
+            %WARNING: THIS ROUTINE IS GRAPHICS AND MEMORY INTENSIVE WHEN
+            %WORKING WITH LARGE POLYGONS. IF THIS ROUTINE IS DESIRED, IT IS
+            %RECOMMENDED THAT IT BE USED ONLY AS A POST-PROCESSING
+            %OPERATION. DO NOT USE IN THE MIDDLE OF OTHER INTENSIVE
+            %CALCULATIONS OR YOU WILL GET TERRIBLE PERFORMANCE AND WAIT
+            %TIMES WHILE RENDERING OR SAVING MATLAB FIGURES.
+            
+            %Prints labels for the segments.
+            this.sketches.SegmentLabels = text(...
+                zeros(this.sides,1),...
+                zeros(this.sides,1),...
+                '');
+            for kk = 1:2
+                switch kk
+                    case 1
+                        start = 1;
+                        step = 1;
+                        finish = this.sides - 1;
+                    case 2
+                        start = this.sides;
+                        step = 1 - this.sides;
+                        finish = 2;
+                end%switch
+                for ii = start:step:finish
+                    iip1 = ii + step;
+                    this.sketches.SegmentLabels(ii).Interpreter = 'latex';
+                    this.sketches.SegmentLabels(ii).Color = this.color;
+                    this.sketches.SegmentLabels(ii).String = ['$S_{',num2str(ii),'}$'];
+                    this.sketches.SegmentLabels(ii).Position(1) = (this.XY(iip1,1) + this.XY(ii,1))*0.5;
+                    this.sketches.SegmentLabels(ii).Position(2) = (this.XY(iip1,2) + this.XY(ii,2))*0.5;
+                    this.sketches.SegmentLabels(ii).Visible = 'off';
+                end%ii
+            end%kk
+            this.generated.VertexLabels = true;
+        end%function
+        function GenerateSelfIntersect(this)
+            if this.simple
+                warning('This polygon is flagged as simple. Are you sure it self intersects?');
+                return;
+            end%if
+            this.sketches.SelfIntersect = line(...
+                'Parent',this.canvas,...
+                'Color',this.color,...
+                'XData',this.xSI,... 
+                'YData',this.ySI,... 
+                'Linewidth',1,...
+                'LineStyle','-',...
+                'Marker','d',...
+                'MarkerEdgeColor',[0,0,0],...
+                'MarkerFaceColor',this.color,...
+                'DisplayName',[this.name, 'Self-Intersections'],...
+                'Visible','off');
+            this.generated.SelfIntersect = true;
+        end%function
+        function GenerateDefaultCanvas(this)
+            %A routine that is called by the above graphics generation
+            %routines to create a canvas in case one has not been preset
+            %already.
+            if ~this.canvas_set
+                warning('Default canvas created!');
+                ax = custom_axis;
+                this.SetCanvas(ax);
+            end%if
+        end%function
+        
+        function ToggleAABB(this)
+            if ~this.AABB_present
+                warning('File AABB.m is not present in the same folder as polygon.m.')
+                return;
+            end%if
+            this.aabb.ToggleBox;
+        end%function
+        function ToggleAABBCenter(this)
+            if ~this.AABB_present
+                warning('File AABB.m is not present in the same folder as polygon.m.')
+                return;
+            end%if
+            this.aabb.ToggleCenter;
+        end%function        
+        
+
     end%methods (Graphics)
-    %Graphical demonstrations
+    %Unit Tests
     methods (Static)
+        function pass = Test0
+            %Tests the area measurement of the shoelace routine. This test
+            %is a replica of "Mathologer"'s video on the subject.
+            %The answer is 55.
+            polygon.CleanSlate;
+            XY = [...
+                +4,+4;...
+                +0,+1;...
+                -2,+5;...
+                -6,+0;...
+                -1,-4;...
+                +5,-2];
+            sides = 6;
+            poly = polygon.CreateFromList(sides,XY);
+            pass = poly.area == 55;
+        end%function
+        function pass = Test1
+            polygon.CleanSlate;
+            XY = [...
+                -4,+6;...
+                +0,+2;...
+                +2,+5;...
+                +7,+0;...
+                +5,-6;...
+                +3,+3;...
+                +0,-5;...
+                -6,+0;...
+                -2,+1];
+            %XY(:,1) = flip(XY(:,1));
+            %XY(:,2) = flip(XY(:,2));
+
+            sides = 9;
+            
+            ax = custom_axis;
+            axis(ax,'equal');
+            poly = polygon.CreateFromList(sides,XY);
+
+            A = zeros(1,poly.sides);
+            A = polygon.Angles(poly.sides,poly.XY,A,poly.orientation);
+            
+            R = 0.4;
+            circles = cell(sides,1);
+            sectors = cell(sides,1);
+            
+            for kk = 1:2
+                switch kk
+                    %case 1 %First Vertex
+                    %    start = 1;
+                    %    next = 1 - sides;
+                    %    finish = 2;
+                    case 1 %Middle Vertices
+                        start = 1;
+                        next = 1;
+                        finish = sides - 1;
+                    case 2 %Last Vertex
+                        start = sides;
+                        next = 1 - sides;
+                        finish = 2;
+                end%switch
+                for ii = start:next:finish
+                    iip1 = ii + next;
+                    [ii,iip1,kk]
+                    circles{ii} = circle.CreateXYR(XY(ii,1),XY(ii,2),R);
+                    circles{ii}.SetCanvas(ax);
+                    %circles{ii}.Show;
+                    dx = poly.XY(iip1,1) - poly.XY(ii,1);
+                    dy = poly.XY(iip1,2) - poly.XY(ii,2);
+                    th1 = atan2(dx,dy);
+                    th2 = th1 + A(ii);
+                    sectors{ii} = CircularSector.CreateByCuttingCircle(circles{ii},th1,th2);
+                    sectors{ii}.InheritFromCircle;
+                    sectors{ii}.GenerateArcPolyline;
+                    sectors{ii}.Polyline.Toggle('LastEdge');
+                    text(ax,XY(ii,1),XY(ii,2),[num2str(A(ii)*180/pi),'$^{\circ}$'],'interpreter','latex');
+                end%ii
+            end%kk
+                    
+            poly.SetCanvas(ax);
+            poly.Toggle('Curve');
+            poly.Toggle('VertexLabels');
+
+            xprt = polygon.ExportToGmsh(poly.sides,poly.XY,false,'Test');
+            
+            pass = false;
+        end%function
         
         function [ax,poly,poly2] = TestOpenPolygon
             polygon.CleanSlate
@@ -2196,7 +2446,7 @@ classdef polygon < handle
             poly = polygon.CreateFromList(length(XY),XY,true);
             poly.SetRefreshRate(4);
             poly.SetCanvas(ax);
-            poly.Show;
+            poly.Toggle('Curve');
             poly.Toggle('Normals');
 
             lambda = 0.25;
@@ -2211,12 +2461,12 @@ classdef polygon < handle
             poly2 = polygon.CreateFromOffset(poly,0.09);
             poly2.SetCanvas(ax);
             poly2.SetColor([1,0,0]);
-            poly2.Show;
+            poly2.Toggle('Curve');
             
             poly3 = polygon.CreateFromOffset(poly,-0.09);
             poly3.SetCanvas(ax);
             poly2.SetColor([0,0,1]);
-            poly3.Show;
+            poly3.Toggle('Curve');
 
             p1 = poly.sketches.Curve;
             p2 = poly2.sketches.Curve;
@@ -2383,7 +2633,7 @@ classdef polygon < handle
             poly.SetCanvas(ax);
             poly.Show;
             poly.GenerateVertexLabels;
-            poly.Toggle('Vertex_Labels');
+            poly.Toggle('VertexLabels');
             %ax.XLim = [-0.0712,0.4309];
             %ax.YLim = [-0.0868,0.2853];
             poly.sketches.Curve.Marker = 'o';
@@ -2510,10 +2760,7 @@ classdef polygon < handle
             poly.Measure;
             poly.Toggle('Normals');
             %poly.GenerateVertexLabels;
-            %poly.Toggle('Vertex_Labels')
-        end%function
-        function [ax,poly] = TestSmoothing
-
+            %poly.Toggle('VertexLabels')
         end%function
         function [ax,poly] = TestNoiseSmoothing
             %Create a regular polygon. Add randomized noise to its coordinates
@@ -2521,8 +2768,8 @@ classdef polygon < handle
             polygon.CleanSlate;
             
             
-            lambda = 0.1; %Scaling factor.
-            stencil = 7; %Number of stencil points.
+            lambda = 0.51; %Scaling factor.
+            stencil = 3; %Number of stencil points.
             %{
             lambda = 0.35; %Scaling factor.
             stencil = 3; %Number of stencil points.
@@ -2537,7 +2784,12 @@ classdef polygon < handle
 
             %Create a regular polygon of many sides and show it.
             load('fiber_copy.mat');
-            fiber = 42;
+            fiber = 13
+            %fiber = 13;
+            %fiber = 12;
+            %fiber = 43;
+            %fiber = 38
+            %fiber = 34;
             XY = fiber_copy{fiber};
             
             %{
@@ -2545,7 +2797,7 @@ classdef polygon < handle
             XY = noise;
             %}
             poly = polygon.CreateFromList(length(XY),XY);
-            
+
             %poly = polygon.CreateRegularByLength(0,0,80,2);
             poly.SetCanvas(ax);
             poly.SetColor([0,0,1]);
@@ -2553,6 +2805,9 @@ classdef polygon < handle
             poly.Show;
             poly.sketches.Curve.LineWidth = 2;
             poly.Toggle('Normals');
+            %poly.GenerateVertexLabels;
+            %poly.Toggle('VertexLabels');
+
             %poly.Toggle('Centroid');
             poly.ToggleAABB;
             set(ax,'XLim',[min(poly.XY(:,1)),max(poly.XY(:,1))]);
@@ -2560,7 +2815,7 @@ classdef polygon < handle
             
             
             %Add random noise to the regular polygon
-            title(ax,'Proceed to distort the Polygon?');
+            %title(ax,'Proceed to distort the Polygon?');
             input('Add Noise?');
             distortions = 2;
             smoothings = 100;
@@ -2579,7 +2834,7 @@ classdef polygon < handle
             
             
             
-            title(ax,'Proceed to smooth the Polygon?');
+            %title(ax,'Proceed to smooth the Polygon?');
             input('Smooth-out the polygon?');
             kk = 0;
             stamp = Imprint(poly);
@@ -2593,16 +2848,16 @@ classdef polygon < handle
                 poly.Smooth(lambda,stencil);
                 if mod(kk,10) == 0
                     stamp = Imprint(poly);
+                    %{
                     text(ax,...
                         (max(poly.XY(:,1))),...
                         (max(poly.XY(:,2)) + min(poly.XY(:,2)))*0.5,...
                         num2str(ii));
+                    %}
                 end
                 fprintf('%10f\t%10f\t%10f\t%10f\t%10f\t%10f \n',poly.area,poly.perimeter,poly.xc,poly.yc, summary.var(1),summary.var(2));
                 poly.Refresh
             end%ii
-        end%function
-        function [ax,poly] = TestDispersion
         end%function
         function [ax,poly] = TestStamping
             %This test demonstrates the stamping feature along with some of
@@ -2669,8 +2924,8 @@ classdef polygon < handle
             stamp = poly.Imprint;
             stamp.Color = [0,0,1];
         end%function
-
         function [ax,poly] = TestPointInclusion
+            %This works only for rectangles.
             polygon.CleanSlate
             
             ax = custom_axis;
@@ -2698,7 +2953,6 @@ classdef polygon < handle
             end%if
             
         end%function
-        
         function [ax,poly,poly2] = TestOffset
             polygon.CleanSlate;
             ax = custom_axis;
@@ -2725,7 +2979,66 @@ classdef polygon < handle
     end%methods (Demonstrations)
     %Low-level SPECIALIZED routines SPECIFIC TO THE CLASS.
     methods (Static)
-        
+         function xprt = ExportToGmsh(N,XY,open,filename)
+            xprt = fopen([filename,'.msh'],'w');
+            %Mesh Format header
+            fprintf(xprt,'$MeshFormat\n');
+            fprintf(xprt,'4.1 0 8\n');
+            fprintf(xprt,'$EndMeshFormat\n');
+            %Entities header
+            fprintf(xprt,'$Entities\n');
+            edges = N*(~open) + (N-1)*open;
+            faces = ~open + open;
+            fprintf(xprt,'%i %i %i %i\n',N,edges,faces,0);
+            %Print CAD vertices.
+            %<ID> <X> <Y> <Z> <n_tags> <tag 1> ... <tag_n>
+            for ii = 1:N
+                fprintf(xprt,'%i %f %f %f %i\n',ii,XY(ii,1),XY(ii,2),0.0,0);
+            end%ii
+            %Printf CAD edges
+            %<ID> <minX> <minY> <minZ> <maxX> <maxY> <maxZ> <n_tags> <> ...
+            %... <> <n_points = 2> <point 1> <point 2>
+            
+            for ii = 1:edges
+                iip1 = ii + 1;
+                if ii == edges
+                    iip1 = 1;
+                end%if
+                %edgetag = ii                    %(1)
+                minX = min(XY(ii,1),XY(iip1,1)); %(2)
+                minY = min(XY(ii,2),XY(iip1,2)); %(3)
+                %minZ = 0;                        %(4)
+                maxX = max(XY(ii,1),XY(iip1,1)); %(5)
+                maxY = max(XY(ii,2),XY(iip1,2)); %(6)
+                %maxZ = 0;                        %(7)
+                %ntags = 0;                       %(8)
+                %npoints = 2;                     %(9)
+                %pointID1 = ii                   %(10)
+                %pointID2 = iip1                 %(11)
+                %              1  2  3  4  5  6  7  8  9 10 11
+                fprintf(xprt,'%i %f %f %f %f %f %f %i %i %i %i\n',ii,minX,minY,0,maxX,maxY,0,0,2,ii,iip1);
+            end%ii
+            if ~open
+                %surface_tag = 1;    %(1)
+                minX = min(XY(:,1)); %(2)
+                minY = min(XY(:,2)); %(3)
+                %minZ = 0;           %(4)
+                maxX = max(XY(:,1)); %(5)
+                maxY = max(XY(:,2)); %(6)
+                %maxZ = 0;           %(7)
+                %ntags = 0;          %(8)
+                %ncurves = edges;    %(9)
+                %              1  2  3  4  5  6  7  8  9
+                fprintf(xprt,'%i %f %f %f %f %f %f %i %i ',1,minX,minY,0,maxX,maxY,0,0,edges);
+                for ii = 1:edges
+                    fprintf(xprt,'%i ',ii);
+                end%ii
+                fprintf(xprt,'\n');
+            end%if
+            fprintf(xprt,'$EndEntities');
+            fclose(xprt);
+        end%function
+   
         %Blending functions (take two segments and blend points in between)
         function [XY,status,circ] = CircularFilletBlend(sides,XY,N,idx,Rf,x1,y1,x2,y2,x3,y3,x4,y4)
             %INPUTS:
@@ -2926,7 +3239,7 @@ classdef polygon < handle
                 iip1 = ii + 1;
                 A = A + XY(ii,1)*XY(iip1,2) - XY(iip1,1)*XY(ii,2);
             end%for            
-            A = A/2; %Halve the area to compute as triangles.
+            A = 0.5*A; %Halve the area to compute as triangles.
         end%function
         function P = Perimeter(sides,XY)
             %Standalone computation of the polygon's perimeter.
@@ -2957,6 +3270,175 @@ classdef polygon < handle
             P = P + sqrt((XY(1,1) - XY(sides,1))^2 +...
                     (XY(1,2) - XY(sides,2))^2);
         end%function
+        function L = Lengths(sides,XY,L)
+            %Standalone routine to measure the lengths of edges. Useful for
+            %when one needs to keep track of individual lengths of segments
+            %of the polyline. Must provide a properly allocated buffer "L"
+            %and buffer "XY".
+            for kk = 1:2
+                switch kk
+                    case 1
+                        start = 1;
+                        next = 1;
+                        finish = sides - 1;
+                    case 2
+                        start = sides;
+                        next = 1 - sides;
+                        finish = 0;
+                end%switch
+                for ii = start:next:finish
+                    iip1 = ii + next;
+                    dx = XY(iip1,1) - XY(ii,1);
+                    dy = XY(iip1,2) - XY(ii,2);
+                    L(ii) = sqrt(dx*dx + dy*dy);
+                end%ii
+            end%kk
+        end%function
+        function N = Normals(sides,XY,N)
+            %Given a buffer "N" that is column-oriented, computes the unit
+            %normals from scratch.
+            for kk = 1:2
+                switch kk
+                    case 1
+                        start = 1;
+                        next = 1;
+                        finish = sides - 1;
+                    case 2
+                        start = sides;
+                        next = 1 - sides;
+                        finish = 2;
+                end%kk
+                for ii = start:next:finish
+                    iip1 = ii + next;
+                    [N(ii,1),N(ii,2)] = UnitNormal2D(...
+                        XY(iip1,1) - XY(ii,1),...%Change in X
+                        XY(iip1,2) - XY(ii,2)... %Change in Y
+                        );
+                end%ii
+            end%kk
+        end%function
+        function N = NormalsReuseL(sides,XY,N,L)
+            %Computes the unit normals just like before, but utilizes the
+            %precomputed lengths to save effort.
+            for kk = 1:2
+                switch kk
+                    case 1
+                        start = 1;
+                        next = 1;
+                        finish = sides - 1;
+                    case 2
+                        start = sides;
+                        next = 1 - sides;
+                        finish = 2;
+                end%kk
+                for ii = start:next:finish
+                    iip1 = ii + next;
+                    N(ii,1) = (XY(ii,2) - XY(iip1,2))/L(ii);
+                    N(ii,2) = (XY(iip1,1) - XY(ii,1))/L(ii);
+                end%ii
+            end%kk
+        end%function
+        function A = Angles(N,XY,A,winding)
+            %Standalone internal angle measurement routine. Provide buffers
+            %"XY" of size N by 2, and "A" of size "N". Computes the Angles
+            %from scratch. By default, the routine assumes that the winding
+            %order is Clockwise (CW). Counterclockwise (CCW) windings are
+            %permitted. Specify CW and CCW orderings with "+1" and "-1"
+            %respectively.
+            
+            %WARNING: Winding can only be "+1" or "-1", however, no error
+            %checking is  provided here.
+            if nargin < 4
+                winding = +1;
+            end%if
+            %winding = +1 = CCW.
+            %winding = -1 = CW.
+            dxiim1 = XY(1,1) - XY(N,1);
+            dyiim1 = XY(1,2) - XY(N,2);
+            Liim1 = sqrt(polygon.Dot1d1d(dxiim1,dyiim1,dxiim1,dyiim1));
+            
+            ccw = winding == +1;
+            cw = winding == -1;
+            for kk = 1:3
+                switch kk
+                    case 1 %First Vertex (cw) or Last Vertex (ccw).
+                        start =      1*cw + ccw*N;
+                        next =       1*cw - ccw*1;
+                        finish =     1*cw + ccw*2;
+                    case 2 %
+                        start =      2*cw + ccw*(N-1);
+                        next =       1*cw - ccw*1;
+                        finish = (N-1)*cw + ccw*2;
+                    case 3%Last Vertex (cw) or First vertex (ccw).
+                        %fprintf('kk = 3\n');
+                        start =      N*cw + ccw*1;
+                        next =   (1-N)*cw + ccw*(N-1);
+                        finish =     2*cw + ccw*(N-2);
+                end%switch
+                for ii = start:next:finish
+                    if kk == 1
+                        fprintf('kk = 1\n');
+                    end
+                    iip1 = ii + next;
+                    dxii = XY(iip1,1) - XY(ii,1);
+                    dyii = XY(iip1,2) - XY(ii,2);
+                    Lii = sqrt(polygon.Dot1d1d(dxii,dyii,dxii,dyii));
+                    A(ii) = pi - acos(polygon.Dot1d1d(dxii,dyii,dxiim1,dyiim1)/(Lii*Liim1));
+                    if polygon.Cross1d1d(dxii,dyii,dxiim1,dyiim1) < 0
+                        A(ii) = 2*pi - A(ii);
+                    end%if
+                    dxiim1 = dxii;
+                    dyiim1 = dyii;
+                    Liim1 = Lii;
+                end%ii
+            end%kk
+        end%function
+        function A = AnglesReuseL(sides,XY,A,L)
+        end%function
+        function K = Curvature(N,XY,K)
+            %Standalone vertex-wise area-based curvature measure. Computes
+            %an approximate discrete curvature from scratch.
+            
+            %This is based on the paper by Julia Cufi, Agusti Revento, and
+            %Carlos J Rodriz title: "Curvature for Polygons."
+            %Published on December 13, 2017 on the American Mathematical
+            %Monthly journal.
+            dxiim1 = XY(1,1) - XY(N,1);
+            dyiim1 = XY(1,2) - XY(N,2);
+            Liim1 = sqrt(polygon.Dot1d1d(dxiim1,dyiim1,dxiim1,dyiim1));
+            for kk = 1:2
+                switch kk
+                    case 1 %First Vertex
+                        start = 1;
+                        next = 1;
+                        finish = N - 1;
+                    case 2 %Last Vertex
+                        start = N;
+                        next = 1-N;
+                        finish = 2;                        
+                end%switch
+                for ii = start:next:finish
+                    iip1 = ii + next;
+                    dxii = XY(iip1,1) - XY(ii,1);
+                    dyii = XY(iip1,2) - XY(ii,2);
+                    Lii = sqrt(polygon.Dot1d1d(dxii,dyii,dxii,dyii));
+                    %Compute the external angle;
+                    angle = acos(polygon.Dot1d1d(dxiim1,dyiim1,dxii,dyii)/(Liim1*Lii));
+                    %Compute the curvature.
+                    K(ii) = 2*angle/(Lii + Liim1);
+                    
+                    dyiim1 = dyii;
+                    dxiim1 = dxii;
+                    Liim1 = Lii;
+                end%ii
+            end%for
+        end%function
+        function K = CurvatureReuseAL(N,XY,K,A,L)
+            %Computes the area-based curvature with the assistance of
+            %precomputed Internal Angles and lengths.
+        end%function
+        
+        
         function [SI,XY_SI,seg] = DetectSelfIntersections(sides,XY)
             %Inspect the polygon for self-intersections.
             %WARNING: THIS IS MY OWN ATTEMPT AT MAKING A SELF-INTERSECTION
@@ -3146,6 +3628,7 @@ classdef polygon < handle
         
         %Compute the normal vectors of a polygon's sides. Needed mainly for
         %offseting operations.
+        %DEPRECATE
         function nxy = Normals2D(sides,XY,nxy)
             if isempty(nxy) || nargin < 3
                 nxy = zeros(sides,2);%Allocate output memory.
@@ -3164,43 +3647,42 @@ classdef polygon < handle
                 end%jj
             end%ii
         end%function
+        %DEPRECATE
         
-        function kappa = Curvature(sides,XY,kappa)
-            %This is based on the paper by Julia Cufi, Agusti Revento, and
-            %Carlos J Rodriz title: "Curvature for Polygons."
-            %Published on December 13, 2017 on the American Mathematical
-            %Monthly journal.
-            for kk = 1:1
-                switch kk
-                    case 1
-                        start = 2;
-                        next1 = 1;
-                        next2 = 2;
-                        finish = sides - 1;
-                    case 2
-                end%switch
-                for ii = start:next1:finish
-                    iip1 = ii + next1;
-                    iip2 = ii + next2;
-                    dx1 = XY(iip1,1) - XY(ii,1);
-                    dy1 = XY(iip1,2) - XY(ii,2);
-                    dx2 = XY(iip2,1) - XY(iip1,1);
-                    dy2 = XY(iip2,2) - XY(iip2,2);
-                    Li = sqrt(dx1*dx1 + dy1*dy1); %Length of segment "i"
-                    Lip1 = sqrt(dx2*dx2 + dy2*dy2); %Length of segment "i+1"
-                    angle = acos((dx2*dx1 + dy2*dy1)/(dx2*dx2 + dy2*dy2 + dx1*dx1 + dy1*dy1));
-                    kappa(ii) = 2*angle/(Li + Lip1);
-                end%ii
-            end%for
+        %Coordinate Manipulation routines
+        function XY = DisplaceCoordinates(XY,sides,dim,dx)
+            %A general Coordinate displacement routine. Given a coordinate
+            %buffer "XY", its size (in the form of the "sides" integer), a
+            %dimension "dim" to represent "N" as in "R^N" space, and an
+            %array of displacement components "dx."
+            for ii = 1:sides
+                for jj = 1:dim
+                    XY(ii,jj) = XY(ii,jj) + dx(jj);
+                end%jj
+            end%ii
         end%function
-        
     end%methods (Static)
     %Low-level ELEMENTARY routines
     methods (Static)
-        %Basic Geometry features.
+        %Elementary 2D geometry routines.
+        function XY = CircularPolarLoop(XY,sides,R,th1,th2)
+            %Simple function that evaluates discrete points on the arc of a
+            %circular sector. It is assumed that th2 > th1. For spanning of
+            %the whole circle, set th1 = 0 and th2 = 2*pi. That is, units
+            %are assumed to be radians.
+            d_theta = (th2 - th1)/(sides - 1);
+            theta = th1;
+            for ii = 1:sides
+                XY(ii,1) = R*sin(theta);
+                XY(ii,2) = R*cos(theta);
+                theta = theta + d_theta;
+            end%ii
+        end%function 
+        
+        %Elementary 2D vector algebra routines.
         function [nx,ny] = UnitNormal2D(dx,dy)
             %Find the unit normal vector to some direction according to a
-            %right-handed coordinate system.
+            %hardcoded 90-degree (pi/4 radian) CCW rotation.
             mag = sqrt(dx*dx + dy*dy); %Magnitude of the input direction.
             nx = -dy/mag;
             ny = +dx/mag;
@@ -3221,7 +3703,31 @@ classdef polygon < handle
             x = x1 + t1*dx1;
             y = y1 + t1*dy1;
         end%function
-
+        function dot = Dot2p2p(x1,y1,x2,y2,x3,y3,x4,y4)
+            dot = polygon.Dot1d1d(...
+                x2 - x1,...
+                y2 - y1,...
+                x4 - x3,...
+                y4 - y3);
+        end%function
+        function dot = Dot1d1d(dx1,dy1,dx2,dy2)
+            dot = dx1*dx2 + dy1*dy2;
+        end%function
+        function det = Cross2p2p(x1,y1,x2,y2,x3,y3,x4,y4)
+            %Computes the magnitude of the vector cross product of two
+            %vectors encoded as 2-point segments
+            det = polygon.Cross1d1d(...
+                x2 - x1,...
+                y2 - y1,...
+                x4 - x3,...
+                y4 - y3);
+        end%function
+        function det = Cross1d1d(dx1,dy1,dx2,dy2)
+            %Computes the magnitude of the vector cross product of two
+            %vectors contained in the 2D plane encoded by their components.
+            det = dx1*dy2 - dy1*dx2;
+        end%function
+        
         %"Quality of Life" routines.
         function CleanSlate
             clc;
